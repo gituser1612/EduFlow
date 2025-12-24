@@ -1,0 +1,7 @@
+{
+  "name": "EduFlow - School Management Platform",
+  "description": "A comprehensive school management platform for tracking attendance and fees with dedicated dashboards for Admin, Teachers, and Parents. Featuring AI-powered student performance insights.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
