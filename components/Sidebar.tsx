@@ -8,7 +8,8 @@ import {
   CalendarCheck, 
   CreditCard, 
   LogOut,
-  GraduationCap
+  GraduationCap,
+  ShieldCheck
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, onLogout }) => {
       { name: 'Dashboard', icon: LayoutDashboard, path: '/admin' },
       { name: 'Teachers', icon: UserSquare2, path: '/admin/teachers' },
       { name: 'Students', icon: Users, path: '/admin/students' },
+      { name: 'Users & Roles', icon: ShieldCheck, path: '/admin/users' },
     ],
     [UserRole.TEACHER]: [
       { name: 'My Dashboard', icon: LayoutDashboard, path: '/teacher' },
