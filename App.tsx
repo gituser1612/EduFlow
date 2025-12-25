@@ -24,7 +24,7 @@ const App: React.FC = () => {
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
-        .single();
+        .maybeSingle();
         
       if (error) {
         console.error("Error fetching profile:", error);
@@ -34,16 +34,26 @@ const App: React.FC = () => {
       if (profile) {
         let linkedId = profile.linked_id;
 
-        // 2. AUTO-LINKING LOGIC: If linkedId is missing, check if this email exists in Teachers or Students
+        // 2. AUTO-LINKING LOGIC: Case-insensitive email bridge
         if (!linkedId) {
           if (profile.role === UserRole.TEACHER) {
-            const { data: teacher } = await supabase.from('teachers').select('id').eq('email', profile.email).single();
+            const { data: teacher } = await supabase
+              .from('teachers')
+              .select('id')
+              .ilike('email', profile.email)
+              .maybeSingle();
+              
             if (teacher) {
               linkedId = teacher.id;
               await supabase.from('profiles').update({ linked_id: teacher.id }).eq('id', sessionUser.id);
             }
           } else if (profile.role === UserRole.PARENT) {
-            const { data: student } = await supabase.from('students').select('id').eq('parent_email', profile.email).single();
+            const { data: student } = await supabase
+              .from('students')
+              .select('id')
+              .ilike('parent_email', profile.email)
+              .maybeSingle();
+              
             if (student) {
               linkedId = student.id;
               await supabase.from('profiles').update({ linked_id: student.id }).eq('id', sessionUser.id);

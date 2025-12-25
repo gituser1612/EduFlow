@@ -65,8 +65,8 @@ const AdminStudents: React.FC = () => {
                            s.rollNo.includes(searchQuery);
       const matchesGrade = selectedGrade === 'All' || s.grade === selectedGrade;
       const matchesFee = feeStatusFilter === 'All' || 
-                        (feeStatusFilter === 'Paid' && s.feesDue === 0) || 
-                        (feeStatusFilter === 'Due' && s.feesDue > 0);
+                        (feeStatusFilter === 'Paid' && (s.feesDue ?? 0) === 0) || 
+                        (feeStatusFilter === 'Due' && (s.feesDue ?? 0) > 0);
       return matchesSearch && matchesGrade && matchesFee;
     });
   }, [students, searchQuery, selectedGrade, feeStatusFilter]);
@@ -78,7 +78,7 @@ const AdminStudents: React.FC = () => {
       grade: student.grade,
       parentName: student.parentName,
       rollNo: student.rollNo,
-      feesDue: student.feesDue
+      feesDue: student.feesDue ?? 0
     });
     setIsModalOpen(true);
   };
@@ -228,8 +228,8 @@ const AdminStudents: React.FC = () => {
                       <span className="text-sm font-bold text-slate-600 px-2 py-1 bg-slate-100 rounded-md">{student.grade}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold ${student.feesDue === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                        {student.feesDue === 0 ? 'Paid' : `₹${student.feesDue.toLocaleString()}`}
+                      <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold ${(student.feesDue ?? 0) === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                        {(student.feesDue ?? 0) === 0 ? 'Paid' : `₹${(student.feesDue ?? 0).toLocaleString()}`}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">

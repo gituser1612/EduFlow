@@ -61,11 +61,11 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
         grade: sData.grade,
         parentName: sData.parent_name,
         rollNo: sData.roll_no,
-        feesDue: sData.fees_due,
+        feesDue: sData.fees_due ?? 0,
         teacherId: sData.teacher_id,
         parentId: ''
       });
-      setPaymentAmount(sData.fees_due);
+      setPaymentAmount(sData.fees_due ?? 0);
 
       // 2. Fetch Attendance
       const { data: aData } = await supabase.from('attendance').select('*').eq('student_id', id).order('date', { ascending: false });
@@ -73,7 +73,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
       // 3. Fetch Payments
       const { data: pData } = await supabase.from('payments').select('*').eq('student_id', id).order('date', { ascending: false });
-      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount, date: p.date, method: p.method as any, term: p.term, receiptNo: p.receipt_no })));
+      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receiptNo: p.receipt_no })));
     } else {
       setStudent(null);
     }
@@ -154,7 +154,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
     const { error: pError } = await supabase.from('payments').insert([newPayment]);
     if (!pError) {
-      const newBalance = Math.max(0, student.feesDue - paymentAmount);
+      const newBalance = Math.max(0, (student.feesDue ?? 0) - paymentAmount);
       await supabase.from('students').update({ fees_due: newBalance }).eq('id', student.id);
       setStudent({ ...student, feesDue: newBalance });
       setPaymentSuccess(true);
@@ -237,7 +237,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div><h1 className="text-2xl font-black text-slate-900">{student.name}'s Profile</h1><p className="text-slate-500 font-medium">Cloud Dashboard • {view}</p></div>
         <div className="flex items-center space-x-3">
-          {student.feesDue > 0 && <div className="px-4 py-2 rounded-2xl border bg-rose-50 border-rose-100 text-rose-600 flex items-center space-x-2 animate-pulse"><AlertCircle className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-tight">Dues Pending</span></div>}
+          {(student.feesDue ?? 0) > 0 && <div className="px-4 py-2 rounded-2xl border bg-rose-50 border-rose-100 text-rose-600 flex items-center space-x-2 animate-pulse"><AlertCircle className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-tight">Dues Pending</span></div>}
           <div className="px-4 py-2 rounded-2xl border bg-emerald-50 border-emerald-100 text-emerald-600 flex items-center space-x-2"><BadgeCheck className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-tight">Account Verified</span></div>
         </div>
       </div>
@@ -247,10 +247,10 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
           <div className="lg:col-span-2 space-y-8">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Attendance</p><p className="text-3xl font-black text-indigo-600">{attendancePercentage}%</p><TrendingUp className="absolute bottom-[-10px] right-[-10px] w-24 h-24 text-indigo-50 opacity-10" />
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Attendance</p><p className="text-3xl font-black text-indigo-600">{(attendancePercentage ?? 0).toLocaleString()}%</p><TrendingUp className="absolute bottom-[-10px] right-[-10px] w-24 h-24 text-indigo-50 opacity-10" />
               </div>
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Dues</p><p className={`text-3xl font-black ${student.feesDue > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>₹{student.feesDue.toLocaleString()}</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Dues</p><p className={`text-3xl font-black ${(student.feesDue ?? 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>₹{(student.feesDue ?? 0).toLocaleString()}</p>
               </div>
             </div>
             <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm"><AttendanceCalendar records={attendance} /></div>
@@ -281,11 +281,11 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
       {view === 'payments' && (
         <div className="lg:col-span-2 space-y-8">
-          {student.feesDue === 0 ? (
+          {(student.feesDue ?? 0) === 0 ? (
             <div className="bg-emerald-50 border-2 border-emerald-100 rounded-[2.5rem] p-12 text-center"><CheckCircle className="w-20 h-20 text-emerald-600 mx-auto mb-6" /><h3 className="text-3xl font-black text-emerald-900">Fees Fully Paid!</h3></div>
           ) : (
             <div className="bg-indigo-600 rounded-[2.5rem] p-10 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between">
-              <div><h3 className="text-2xl font-black mb-2">Secure Fee Payment</h3><p className="text-indigo-100 text-sm mb-6">Settlement required for child's term.</p><div className="bg-white/10 p-4 rounded-2xl border border-white/20"><p className="text-xs font-black uppercase">Outstanding</p><p className="text-4xl font-black">₹{student.feesDue.toLocaleString()}</p></div></div>
+              <div><h3 className="text-2xl font-black mb-2">Secure Fee Payment</h3><p className="text-indigo-100 text-sm mb-6">Settlement required for child's term.</p><div className="bg-white/10 p-4 rounded-2xl border border-white/20"><p className="text-xs font-black uppercase">Outstanding</p><p className="text-4xl font-black">₹{(student.feesDue ?? 0).toLocaleString()}</p></div></div>
               <button onClick={() => setIsPaymentModalOpen(true)} className="bg-white text-indigo-600 px-10 py-5 rounded-2xl font-black text-lg shadow-xl mt-8 md:mt-0">Pay Online Now</button>
             </div>
           )}
@@ -296,7 +296,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
               <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                 <td className="px-8 py-6 text-sm font-black">{p.receiptNo}</td>
                 <td className="px-8 py-6 text-sm font-bold text-slate-600">{p.date}</td>
-                <td className="px-8 py-6 text-sm font-black text-emerald-600">₹{p.amount.toLocaleString()}</td>
+                <td className="px-8 py-6 text-sm font-black text-emerald-600">₹{(p.amount ?? 0).toLocaleString()}</td>
               </tr>
             ))}
           </tbody></table></div>
@@ -314,7 +314,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                 <h3 className="text-xl font-black text-slate-900">Complete Payment</h3>
                 <input type="number" className="w-full bg-slate-50 border rounded-3xl p-5 text-3xl font-black text-slate-900 outline-none" value={paymentAmount} max={student.feesDue} onChange={e => setPaymentAmount(parseInt(e.target.value) || 0)} required />
                 <button type="submit" disabled={isProcessing} className="w-full bg-indigo-600 text-white font-black py-6 rounded-[2rem] shadow-2xl disabled:opacity-50">
-                  {isProcessing ? <Loader2 className="w-6 h-6 animate-spin mx-auto" /> : `Authorize ₹${paymentAmount.toLocaleString()}`}
+                  {isProcessing ? <Loader2 className="w-6 h-6 animate-spin mx-auto" /> : `Authorize ₹${(paymentAmount ?? 0).toLocaleString()}`}
                 </button>
               </form>
             )}

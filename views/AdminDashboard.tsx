@@ -225,7 +225,7 @@ const AdminDashboard: React.FC = () => {
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} dx={-10} domain={[0, 100]} />
                   <Tooltip 
                     contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                    formatter={(value: number) => [`${value}%`, 'Attendance']}
+                    formatter={(value: number) => [`${(value ?? 0).toLocaleString()}%`, 'Attendance']}
                   />
                   <Area type="monotone" dataKey="attendance" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorAttend)" />
                 </AreaChart>
@@ -263,7 +263,7 @@ const AdminDashboard: React.FC = () => {
                   <Tooltip 
                     cursor={{fill: '#f8fafc'}}
                     contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                    formatter={(value: number) => [`₹${value.toLocaleString()}`, 'Amount']}
+                    formatter={(value: number) => [`₹${(value ?? 0).toLocaleString()}`, 'Amount']}
                   />
                   <Bar dataKey="collected" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
                   <Bar dataKey="due" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={20} />
