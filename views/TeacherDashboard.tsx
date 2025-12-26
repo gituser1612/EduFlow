@@ -1,18 +1,19 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Users, 
   CalendarCheck, 
   CheckCircle2, 
   XCircle, 
   Clock,
-  MessageSquare,
   BookOpen,
   Filter,
-  ChevronDown,
   Loader2,
   Info,
-  AlertCircle
+  AlertCircle,
+  FileDown,
+  Wallet,
+  CloudCheck
 } from 'lucide-react';
 import { AttendanceStatus, Teacher, Student } from '../types';
 import { supabase } from '../supabase';
@@ -28,13 +29,35 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
   
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [markedToday, setMarkedToday] = useState<Record<string, AttendanceStatus>>({});
+  const [initialMarks, setInitialMarks] = useState<Record<string, AttendanceStatus>>({});
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const fetchTodayAttendance = useCallback(async (studentIds: string[]) => {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('student_id, status')
+        .eq('date', today)
+        .in('student_id', studentIds);
+
+      if (!error && data) {
+        const marks: Record<string, AttendanceStatus> = {};
+        data.forEach(item => {
+          marks[item.student_id] = item.status as AttendanceStatus;
+        });
+        setMarkedToday(marks);
+        setInitialMarks(marks);
+      }
+    } catch (err) {
+      console.error("Error fetching today's marks:", err);
+    }
+  }, []);
 
   const fetchTeacherData = async () => {
     setIsLoading(true);
     try {
-      // 1. Fetch Teacher Info
       const { data: teacherData, error: tError } = await supabase
         .from('teachers')
         .select('*')
@@ -55,7 +78,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
         if (assigned.length > 0) {
           setSelectedClass(assigned[0]);
           
-          // 2. Fetch Students matching the assigned classes (Grades)
           const { data: studentsData, error: sError } = await supabase
             .from('students')
             .select('*')
@@ -64,7 +86,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
           if (sError) throw sError;
 
           if (studentsData) {
-            setStudents(studentsData.map(s => ({
+            const mappedStudents = studentsData.map(s => ({
               id: s.id,
               name: s.name,
               grade: s.grade,
@@ -73,7 +95,11 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
               feesDue: s.fees_due ?? 0,
               teacherId: s.teacher_id,
               parentId: ''
-            })));
+            }));
+            setStudents(mappedStudents);
+            
+            // Sync current state from DB for existing marks
+            await fetchTodayAttendance(mappedStudents.map(s => s.id));
           }
         }
       }
@@ -102,7 +128,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
     if (!teacher) return [];
     return teacher.assignedClasses.map(cls => ({
       name: cls,
-      studentCount: students.filter(s => s.grade === cls).length
+      studentCount: students.filter(s => s.grade === cls).length,
+      totalDues: students.filter(s => s.grade === cls).reduce((sum, s) => sum + (s.feesDue || 0), 0)
     }));
   }, [teacher, students]);
 
@@ -111,55 +138,67 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
   };
 
   const submitAttendance = async () => {
-    if (Object.keys(markedToday).length === 0) return;
+    const entries = Object.entries(markedToday);
+    if (entries.length === 0) return;
+    
     setIsSubmitting(true);
     const today = new Date().toISOString().split('T')[0];
     
     try {
-      const records = Object.entries(markedToday).map(([studentId, status]) => ({
+      const records = entries.map(([studentId, status]) => ({
         student_id: studentId,
         date: today,
         status: status,
         notes: '' 
       }));
 
+      // Use UPSERT with conflict on student_id and date
       const { error } = await supabase
         .from('attendance')
-        .insert(records);
+        .upsert(records, { onConflict: 'student_id,date' });
 
       if (error) throw error;
 
       setShowConfirm(true);
+      setInitialMarks({...markedToday});
       setTimeout(() => setShowConfirm(false), 3000);
-      setMarkedToday({});
     } catch (err: any) {
-      alert(err.message);
+      alert("Submission Error: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const downloadDuesReport = () => {
+    const reportData = filteredStudents
+      .filter(s => (s.feesDue ?? 0) > 0)
+      .map(s => `${s.rollNo},${s.name},${s.grade},${s.feesDue}`);
+    
+    if (reportData.length === 0) {
+      alert("No students with pending dues found in this class.");
+      return;
+    }
+
+    const header = "Roll No,Student Name,Grade,Pending Fees (INR)\n";
+    const csvContent = "data:text/csv;charset=utf-8," + header + reportData.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Dues_Report_Class_${selectedClass}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const hasUnsavedChanges = useMemo(() => {
+    return JSON.stringify(markedToday) !== JSON.stringify(initialMarks);
+  }, [markedToday, initialMarks]);
+
   if (isLoading) {
     return (
       <div className="h-96 flex flex-col items-center justify-center space-y-4">
         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-        <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Loading Classroom...</p>
-      </div>
-    );
-  }
-
-  if (!teacher || teacher.assignedClasses.length === 0) {
-    return (
-      <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6 px-4 animate-in fade-in duration-700">
-        <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 ring-8 ring-slate-50">
-          <BookOpen className="w-10 h-10" />
-        </div>
-        <div>
-          <h3 className="text-2xl font-black text-slate-900 mb-2">No Classes Assigned</h3>
-          <p className="text-slate-500 max-w-sm mx-auto font-medium leading-relaxed">
-            Please ask your administrator to assign classes (grades) to your profile in the <span className="text-indigo-600 font-bold">Teacher Management</span> tab.
-          </p>
-        </div>
+        <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Restoring Session...</p>
       </div>
     );
   }
@@ -169,31 +208,40 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Teacher's Workspace</h1>
-          <p className="text-slate-500 font-medium">Classroom Management • {teacher?.name}</p>
+          <p className="text-slate-500 font-medium">Synced Attendance & Fees • {teacher?.name}</p>
         </div>
-        <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-2xl flex items-center space-x-3 shadow-sm ring-4 ring-slate-50/50">
-          <CalendarCheck className="w-5 h-5 text-indigo-600" />
-          <span className="text-sm font-bold text-slate-700">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
-          </span>
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={downloadDuesReport}
+            className="hidden sm:flex items-center space-x-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-2xl font-bold text-sm hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <FileDown className="w-4 h-4 text-indigo-600" />
+            <span>Export Dues</span>
+          </button>
+          <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-2xl flex items-center space-x-3 shadow-sm ring-4 ring-slate-50/50">
+            <CalendarCheck className="w-5 h-5 text-indigo-600" />
+            <span className="text-sm font-bold text-slate-700">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+            </span>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
           <BookOpen className="absolute -bottom-4 -right-4 w-24 h-24 text-slate-50 opacity-10 group-hover:scale-110 transition-transform" />
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Active Classes</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Assigned Classes</p>
           <p className="text-3xl font-black text-slate-900">{teacher?.assignedClasses.length}</p>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
           <Users className="absolute -bottom-4 -right-4 w-24 h-24 text-slate-50 opacity-10 group-hover:scale-110 transition-transform" />
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Students</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Enrollment</p>
           <p className="text-3xl font-black text-slate-900">{students.length}</p>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
-          <CheckCircle2 className="absolute -bottom-4 -right-4 w-24 h-24 text-slate-50 opacity-10 group-hover:scale-110 transition-transform" />
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Register Marked</p>
-          <p className="text-3xl font-black text-indigo-600">{Object.keys(markedToday).length}</p>
+          <Wallet className="absolute -bottom-4 -right-4 w-24 h-24 text-slate-50 opacity-10 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Class Pending Fees</p>
+          <p className="text-3xl font-black text-rose-600">₹{students.reduce((acc, s) => acc + (s.feesDue || 0), 0).toLocaleString()}</p>
         </div>
       </div>
 
@@ -215,24 +263,24 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
                       : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                   }`}
                 >
-                  <span className="text-sm font-bold">Class {stat.name}</span>
-                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                    selectedClass === stat.name ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'
-                  }`}>
-                    {stat.studentCount}
-                  </span>
+                  <div className="text-left">
+                    <span className="text-sm font-bold block">Class {stat.name}</span>
+                    <span className={`text-[10px] ${selectedClass === stat.name ? 'text-indigo-200' : 'text-slate-500'}`}>
+                      {stat.studentCount} Students
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
           
-          <div className="bg-amber-50 border border-amber-100 p-6 rounded-3xl">
-            <h4 className="flex items-center space-x-2 text-amber-900 font-black text-xs uppercase mb-3">
-              <Info className="w-4 h-4" />
-              <span>Quick Sync Tip</span>
+          <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-3xl">
+            <h4 className="flex items-center space-x-2 text-emerald-900 font-black text-xs uppercase mb-3">
+              <CloudCheck className="w-4 h-4" />
+              <span>Live Sync</span>
             </h4>
-            <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
-              If a class shows <span className="font-bold">0 students</span>, ensure your Admin assigned the grade exactly (e.g., "9th" instead of "9").
+            <p className="text-[11px] text-emerald-700 font-medium leading-relaxed">
+              Updates are reflected in the Parent Dashboard instantly upon saving. Corrections are allowed.
             </p>
           </div>
         </div>
@@ -243,22 +291,28 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
               <div>
                 <h3 className="text-xl font-black text-slate-900">Attendance Register</h3>
                 <p className="text-sm text-slate-400 font-medium mt-1">
-                  Viewing Enrollment: <span className="text-indigo-600 font-bold uppercase">{selectedClass}</span>
+                  Grade: <span className="text-indigo-600 font-bold uppercase">{selectedClass}</span>
                 </p>
               </div>
-              <button 
-                onClick={submitAttendance} 
-                disabled={Object.keys(markedToday).length === 0 || isSubmitting} 
-                className="px-8 py-3.5 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 disabled:opacity-50 flex items-center space-x-2"
-              >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CalendarCheck className="w-5 h-5" />}
-                <span>{isSubmitting ? 'Syncing...' : 'Submit Register'}</span>
-              </button>
+              <div className="flex items-center space-x-3">
+                <button 
+                  onClick={submitAttendance} 
+                  disabled={!hasUnsavedChanges || isSubmitting} 
+                  className={`px-8 py-3.5 font-black rounded-2xl transition-all shadow-xl flex items-center space-x-2 ${
+                    hasUnsavedChanges 
+                    ? 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700' 
+                    : 'bg-slate-100 text-slate-400 shadow-none cursor-default'
+                  }`}
+                >
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CloudCheck className="w-5 h-5" />}
+                  <span>{isSubmitting ? 'Syncing...' : hasUnsavedChanges ? 'Save Changes' : 'Synced with Cloud'}</span>
+                </button>
+              </div>
             </div>
 
             {showConfirm && (
               <div className="bg-emerald-500 text-white p-4 text-center text-sm font-black animate-in fade-in slide-in-from-top-2">
-                ✓ Attendance successfully synced to cloud storage!
+                ✓ Attendance successfully updated and sent to parents!
               </div>
             )}
 
@@ -267,9 +321,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest">
                   <tr>
                     <th className="px-8 py-5">Roll No.</th>
-                    <th className="px-8 py-5">Student Identity</th>
-                    <th className="px-8 py-5 text-center">Marking</th>
-                    <th className="px-8 py-5">Notes</th>
+                    <th className="px-8 py-5">Student</th>
+                    <th className="px-8 py-5">Fees Dues</th>
+                    <th className="px-8 py-5 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -278,11 +332,18 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
                       <td className="px-8 py-6 text-sm font-black text-indigo-600">#{student.rollNo}</td>
                       <td className="px-8 py-6">
                         <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 font-black text-sm">
+                          <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 font-black text-sm uppercase">
                             {student.name.charAt(0)}
                           </div>
                           <span className="text-sm font-black text-slate-900">{student.name}</span>
                         </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <span className={`text-xs font-bold px-3 py-1.5 rounded-xl ${
+                          (student.feesDue ?? 0) > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          ₹{(student.feesDue ?? 0).toLocaleString()}
+                        </span>
                       </td>
                       <td className="px-8 py-6">
                         <div className="flex items-center justify-center space-x-2">
@@ -306,24 +367,11 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
                           ))}
                         </div>
                       </td>
-                      <td className="px-8 py-6">
-                        <input 
-                          type="text" 
-                          placeholder="e.g. Health issue" 
-                          className="bg-slate-50 border-2 border-slate-100 rounded-xl py-2 px-4 text-[10px] font-bold w-full outline-none focus:border-indigo-500 focus:bg-white transition-all" 
-                        />
-                      </td>
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={4} className="px-8 py-20 text-center">
-                        <div className="flex flex-col items-center justify-center space-y-4">
-                          <AlertCircle className="w-10 h-10 text-slate-200" />
-                          <div>
-                            <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">No Student Match</p>
-                            <p className="text-slate-300 text-xs font-medium mt-1">No students found in Grade "{selectedClass}"</p>
-                          </div>
-                        </div>
+                      <td colSpan={4} className="px-8 py-20 text-center text-slate-400 font-bold uppercase text-xs tracking-widest">
+                        No students found in this grade.
                       </td>
                     </tr>
                   )}

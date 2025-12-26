@@ -14,7 +14,9 @@ import {
   Users,
   AlertTriangle,
   X,
-  Loader2
+  Loader2,
+  Mail,
+  AlertCircle
 } from 'lucide-react';
 import { Student } from '../types';
 import { supabase } from '../supabase';
@@ -22,6 +24,7 @@ import { supabase } from '../supabase';
 const AdminStudents: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGrade, setSelectedGrade] = useState<string>('All');
   const [feeStatusFilter, setFeeStatusFilter] = useState<'All' | 'Paid' | 'Due'>('All');
@@ -30,24 +33,45 @@ const AdminStudents: React.FC = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
     grade: '',
     parentName: '',
+    parentEmail: '',
     rollNo: '',
     feesDue: 0
   });
 
   const fetchStudents = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase
-      .from('students')
-      .select('*')
-      .order('name');
-      
-    if (data) setStudents(data);
-    setIsLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .order('name');
+        
+      if (error) throw error;
+
+      if (data) {
+        const mapped: Student[] = data.map(s => ({
+          id: s.id,
+          name: s.name,
+          grade: s.grade,
+          parentName: s.parent_name,
+          parentId: '', 
+          teacherId: s.teacher_id,
+          rollNo: s.roll_no,
+          feesDue: s.fees_due ?? 0
+        }));
+        setStudents(mapped);
+      }
+    } catch (err) {
+      console.error("Fetch students error:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -71,12 +95,15 @@ const AdminStudents: React.FC = () => {
     });
   }, [students, searchQuery, selectedGrade, feeStatusFilter]);
 
-  const handleEdit = (student: Student) => {
+  const handleEdit = async (student: Student) => {
+    setModalError(null);
     setEditingStudent(student);
+    const { data } = await supabase.from('students').select('parent_email').eq('id', student.id).single();
     setFormData({
       name: student.name,
       grade: student.grade,
       parentName: student.parentName,
+      parentEmail: data?.parent_email || '',
       rollNo: student.rollNo,
       feesDue: student.feesDue ?? 0
     });
@@ -84,58 +111,95 @@ const AdminStudents: React.FC = () => {
   };
 
   const confirmDelete = async () => {
-    if (studentToDelete) {
+    if (!studentToDelete) return;
+    try {
       const { error } = await supabase
         .from('students')
         .delete()
         .eq('id', studentToDelete.id);
         
-      if (!error) {
-        setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
-        setIsDeleteModalOpen(false);
-        setStudentToDelete(null);
-      } else {
-        alert(error.message);
-      }
+      if (error) throw error;
+      setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+      setIsDeleteModalOpen(false);
+      setStudentToDelete(null);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete student");
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingStudent) {
-      const { data, error } = await supabase
-        .from('students')
-        .update({
-          name: formData.name,
-          grade: formData.grade,
-          parentName: formData.parentName,
-          rollNo: formData.rollNo,
-          feesDue: formData.feesDue
-        })
-        .eq('id', editingStudent.id)
-        .select();
-        
-      if (!error) {
-        setStudents(prev => prev.map(s => s.id === editingStudent.id ? data[0] : s));
-        setIsModalOpen(false);
+    if (isSubmitting) return;
+
+    setModalError(null);
+    setIsSubmitting(true);
+    
+    try {
+      const trimmedRollNo = formData.rollNo.trim();
+
+      // Check for duplicate roll number in local state first for instant feedback
+      const localDuplicate = students.find(s => s.rollNo === trimmedRollNo && (!editingStudent || s.id !== editingStudent.id));
+      
+      if (localDuplicate) {
+        const msg = `Student "${localDuplicate.name}" already exists with Roll Number ${trimmedRollNo}.`;
+        setModalError(msg);
+        alert(`Action Blocked: ${msg}`);
+        setIsSubmitting(false);
+        return;
       }
-    } else {
-      const { data, error } = await supabase
+
+      // Deep verification with Database
+      const { data: existingStudentWithRoll, error: checkError } = await supabase
         .from('students')
-        .insert([{
-          name: formData.name,
-          grade: formData.grade,
-          parentName: formData.parentName,
-          rollNo: formData.rollNo,
-          feesDue: formData.feesDue,
-          teacher_id: 't1' // default
-        }])
-        .select();
-        
-      if (!error) {
-        setStudents(prev => [data[0], ...prev]);
-        setIsModalOpen(false);
+        .select('id, name')
+        .eq('roll_no', trimmedRollNo)
+        .maybeSingle();
+
+      if (checkError) throw checkError;
+
+      if (existingStudentWithRoll && (!editingStudent || existingStudentWithRoll.id !== editingStudent.id)) {
+        const msg = `Student "${existingStudentWithRoll.name}" already exists with Roll Number ${trimmedRollNo}.`;
+        setModalError(msg);
+        alert(`Action Blocked: ${msg}`);
+        setIsSubmitting(false);
+        return;
       }
+
+      const payload = {
+        name: formData.name.trim(),
+        grade: formData.grade.trim(),
+        parent_name: formData.parentName.trim(),
+        parent_email: formData.parentEmail.toLowerCase().trim(),
+        roll_no: trimmedRollNo,
+        fees_due: formData.feesDue
+      };
+
+      let resultError;
+      if (editingStudent) {
+        const { error } = await supabase
+          .from('students')
+          .update(payload)
+          .eq('id', editingStudent.id);
+        resultError = error;
+      } else {
+        const { error } = await supabase
+          .from('students')
+          .insert([payload]);
+        resultError = error;
+      }
+
+      if (resultError) throw resultError;
+
+      await fetchStudents();
+      setIsModalOpen(false);
+      setEditingStudent(null);
+    } catch (err: any) {
+      console.error("Student persistence error details:", err);
+      const errorMsg = err.message || (typeof err === 'string' ? err : JSON.stringify(err));
+      setModalError(errorMsg);
+      alert(`Persistence Error: ${errorMsg}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -144,12 +208,13 @@ const AdminStudents: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Student Directory</h1>
-          <p className="text-slate-500">Manage records in real-time via Supabase Cloud.</p>
+          <p className="text-slate-500 font-medium">Manage records in real-time via Supabase Cloud.</p>
         </div>
         <button 
           onClick={() => {
+            setModalError(null);
             setEditingStudent(null);
-            setFormData({ name: '', grade: '', parentName: '', rollNo: '', feesDue: 0 });
+            setFormData({ name: '', grade: '', parentName: '', parentEmail: '', rollNo: '', feesDue: 0 });
             setIsModalOpen(true);
           }}
           className="flex items-center space-x-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
@@ -166,7 +231,7 @@ const AdminStudents: React.FC = () => {
             <input 
               type="text" 
               placeholder="Search by name or roll number..." 
-              className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm text-black focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+              className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 pl-11 pr-4 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -175,20 +240,20 @@ const AdminStudents: React.FC = () => {
             <select 
               value={selectedGrade}
               onChange={(e) => setSelectedGrade(e.target.value)}
-              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
             >
               {availableGrades.map(grade => (
-                <option key={grade} value={grade}>{grade === 'All' ? 'All Classes' : `Class ${grade}`}</option>
+                <option key={grade} value={grade} className="text-slate-900 font-bold">{grade === 'All' ? 'All Classes' : `Class ${grade}`}</option>
               ))}
             </select>
             <select 
               value={feeStatusFilter}
               onChange={(e) => setFeeStatusFilter(e.target.value as any)}
-              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
             >
-              <option value="All">All Fee Status</option>
-              <option value="Paid">Paid Only</option>
-              <option value="Due">With Dues</option>
+              <option value="All" className="text-slate-900 font-bold">All Fee Status</option>
+              <option value="Paid" className="text-slate-900 font-bold">Paid Only</option>
+              <option value="Due" className="text-slate-900 font-bold">With Dues</option>
             </select>
           </div>
         </div>
@@ -218,7 +283,7 @@ const AdminStudents: React.FC = () => {
                     <td className="px-6 py-4 font-bold text-indigo-600 text-sm">#{student.rollNo}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 font-bold">
+                        <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 font-bold uppercase">
                           {student.name.charAt(0)}
                         </div>
                         <span className="text-sm font-semibold text-slate-900">{student.name}</span>
@@ -250,34 +315,55 @@ const AdminStudents: React.FC = () => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}></div>
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => !isSubmitting && setIsModalOpen(false)}></div>
           <div className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
               <h3 className="text-xl font-bold">{editingStudent ? 'Update Profile' : 'New Enrollment'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
+              <button onClick={() => !isSubmitting && setIsModalOpen(false)} className="text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-8 space-y-4">
+            <form onSubmit={handleSubmit} className="p-8 space-y-4 max-h-[80vh] overflow-y-auto">
+              {modalError && (
+                <div className="bg-rose-50 border border-rose-100 text-rose-600 p-4 rounded-xl flex items-start space-x-3 mb-2 animate-in slide-in-from-top-2">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm font-bold">{modalError}</p>
+                </div>
+              )}
+              
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Full Name</label>
-                  <input className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Student Full Name</label>
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required disabled={isSubmitting} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Roll No</label>
-                  <input className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.rollNo} onChange={e => setFormData({...formData, rollNo: e.target.value})} required />
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.rollNo} onChange={e => setFormData({...formData, rollNo: e.target.value})} required disabled={isSubmitting} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Grade</label>
-                  <input className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.grade} onChange={e => setFormData({...formData, grade: e.target.value})} placeholder="e.g. 10th" required />
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Grade / Class</label>
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.grade} onChange={e => setFormData({...formData, grade: e.target.value})} placeholder="e.g. 10th" required disabled={isSubmitting} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Parent Full Name</label>
+                  <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.parentName} onChange={e => setFormData({...formData, parentName: e.target.value})} required disabled={isSubmitting} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                    <span>Parent Email</span>
+                    <span className="text-[10px] text-indigo-500 italic lowercase">Used for parent portal login</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-11 pr-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.parentEmail} onChange={e => setFormData({...formData, parentEmail: e.target.value})} placeholder="parent@example.com" required disabled={isSubmitting} />
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Fee Balance (₹)</label>
-                  <input type="number" className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.feesDue} onChange={e => setFormData({...formData, feesDue: parseInt(e.target.value) || 0})} />
+                  <input type="number" className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.feesDue} onChange={e => setFormData({...formData, feesDue: parseInt(e.target.value) || 0})} disabled={isSubmitting} />
                 </div>
               </div>
-              <button type="submit" className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center space-x-2">
-                <CheckCircle className="w-5 h-5" />
-                <span>{editingStudent ? 'Update Database' : 'Confirm Enrollment'}</span>
+              <button type="submit" disabled={isSubmitting} className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center space-x-2 disabled:opacity-50">
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                <span>{isSubmitting ? 'Processing...' : (editingStudent ? 'Update Database' : 'Confirm Enrollment')}</span>
               </button>
             </form>
           </div>
