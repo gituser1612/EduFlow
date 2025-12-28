@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Calendar, 
   CreditCard, 
@@ -22,7 +22,10 @@ import {
   GraduationCap,
   Sparkles,
   Zap,
-  ReceiptText
+  ReceiptText,
+  QrCode,
+  Timer,
+  LogOut
 } from 'lucide-react';
 import AttendanceCalendar from '../components/AttendanceCalendar';
 import { Student, PaymentRecord, AttendanceRecord, AttendanceStatus } from '../types';
@@ -46,11 +49,16 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
   const [linkError, setLinkError] = useState<string | null>(null);
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentStep, setPaymentStep] = useState<'form' | 'processing' | 'success'>('form');
+  const [paymentStep, setPaymentStep] = useState<'form' | 'gateway' | 'success'>('form');
 
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [receiptAmount, setReceiptAmount] = useState<number>(0); // Fixed 0 amount bug
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Card' | 'Cash'>('UPI');
   const [lastReceipt, setLastReceipt] = useState<string>('');
+  
+  // Timer State
+  const [timeLeft, setTimeLeft] = useState(240); // 4 minutes
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = async (id: string) => {
     setIsLoading(true);
@@ -66,7 +74,8 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
         teacherId: sData.teacher_id,
         parentId: ''
       });
-      setPaymentAmount(sData.fees_due ?? 0);
+      // Don't reset paymentAmount if it's already set to prevent UI flicker
+      setPaymentAmount(prev => prev === 0 ? (sData.fees_due ?? 0) : prev);
 
       const { data: aData } = await supabase.from('attendance').select('*').eq('student_id', id).order('date', { ascending: false });
       if (aData) setAttendance(aData.map(a => ({ id: a.id, studentId: a.student_id, date: a.date, status: a.status as AttendanceStatus, notes: a.notes })));
@@ -85,21 +94,41 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     }
   }, [activeStudentId]);
 
-  const handlePayment = async (e: React.FormEvent) => {
+  // Timer logic for Gateway step
+  useEffect(() => {
+    if (paymentStep === 'gateway' && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0) {
+      closePaymentModal();
+      alert("Payment session expired. Please try again.");
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [paymentStep, timeLeft]);
+
+  const startPayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!student || paymentAmount <= 0) return;
-    
-    setPaymentStep('processing');
+    setReceiptAmount(paymentAmount); // Capture the amount for receipt before any state resets
+    setPaymentStep('gateway');
+    setTimeLeft(240);
+  };
 
+  const finalizePayment = async () => {
+    if (!student || receiptAmount <= 0) return;
+    
+    // Switch to a temporary processing state within the UI if needed, 
+    // but here we move directly to finalizing for the demo
     const receiptNo = `RCP-${Math.floor(Math.random() * 900000) + 100000}`;
     setLastReceipt(receiptNo);
 
-    // Simulated Gateway Delay
-    await new Promise(resolve => setTimeout(resolve, 2500));
-
     const newPayment = {
       student_id: student.id,
-      amount: paymentAmount,
+      amount: receiptAmount,
       method: paymentMethod,
       term: 'Quarterly Fees',
       receipt_no: receiptNo,
@@ -108,12 +137,14 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
     const { error: pError } = await supabase.from('payments').insert([newPayment]);
     if (!pError) {
-      const newBalance = Math.max(0, (student.feesDue ?? 0) - paymentAmount);
+      const newBalance = Math.max(0, (student.feesDue ?? 0) - receiptAmount);
       await supabase.from('students').update({ fees_due: newBalance }).eq('id', student.id);
       
-      setStudent({ ...student, feesDue: newBalance });
+      setStudent(prev => prev ? { ...prev, feesDue: newBalance } : null);
       setPaymentStep('success');
-      fetchData(student.id);
+      // Refresh historical data
+      const { data: pData } = await supabase.from('payments').select('*').eq('student_id', student.id).order('date', { ascending: false });
+      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receiptNo: p.receipt_no })));
     } else {
       alert(pError.message);
       setPaymentStep('form');
@@ -121,16 +152,27 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
   };
 
   const closePaymentModal = () => {
-    if (paymentStep === 'processing') return;
+    if (timerRef.current) clearInterval(timerRef.current);
     setIsPaymentModalOpen(false);
-    setTimeout(() => setPaymentStep('form'), 300);
+    setPaymentStep('form');
+    setTimeLeft(240);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const attendancePercentage = attendance.length > 0 ? Math.round((attendance.filter(a => a.status === 'PRESENT').length / attendance.length) * 100) : 100;
 
   if (isLoading) return (
     <div className="h-96 flex flex-col items-center justify-center space-y-4">
-      <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+      <div className="w-12 h-12 border-4 border-slate-100 border-t-indigo-600 rounded-full animate-spin"></div>
       <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Connecting Portal...</p>
     </div>
   );
@@ -163,6 +205,16 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
             </button>
             {linkError && <p className="text-rose-500 text-center font-bold text-sm">{linkError}</p>}
           </form>
+
+          <div className="mt-8 pt-8 border-t border-slate-100">
+            <button 
+              onClick={handleSignOut}
+              className="w-full py-4 text-slate-400 hover:text-rose-600 font-bold text-sm flex items-center justify-center space-x-2 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Not your account? Sign Out</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -379,7 +431,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                 </div>
 
                 <button 
-                  onClick={handlePayment} 
+                  onClick={startPayment} 
                   disabled={paymentAmount <= 0}
                   className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
                 >
@@ -389,19 +441,45 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
               </div>
             )}
 
-            {/* Step 2: Processing */}
-            {paymentStep === 'processing' && (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-8 animate-in zoom-in-95 duration-500">
-                <div className="relative">
-                  <div className="w-24 h-24 border-8 border-slate-100 rounded-full"></div>
-                  <div className="absolute inset-0 w-24 h-24 border-8 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <ShieldCheck className="w-10 h-10 text-indigo-600 animate-pulse" />
+            {/* Step 2: Gateway (QR & Timer) */}
+            {paymentStep === 'gateway' && (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6 animate-in zoom-in-95 duration-500">
+                <div className="flex items-center justify-between w-full mb-4">
+                   <div className="flex items-center space-x-2 text-indigo-600">
+                      <Timer className="w-5 h-5 animate-pulse" />
+                      <span className="text-xl font-black font-mono">{formatTime(timeLeft)}</span>
+                   </div>
+                   <button onClick={closePaymentModal} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="relative group">
+                  <div className="w-56 h-56 bg-white rounded-3xl border-2 border-indigo-600 p-6 shadow-2xl shadow-indigo-100 flex items-center justify-center relative overflow-hidden">
+                    <QrCode className="w-full h-full text-slate-900" />
+                    <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                       <span className="bg-indigo-600 text-white px-4 py-2 rounded-full text-xs font-black shadow-lg">Scan to Pay</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col items-center">
+                    <p className="text-2xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Order Ref: {Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <h4 className="text-2xl font-black text-slate-900">Securing Transaction</h4>
-                  <p className="text-slate-500 font-medium text-sm max-w-xs mx-auto">Communicating with your bank for secure authorization. Do not refresh.</p>
+
+                <div className="space-y-4 w-full">
+                  <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100 flex items-start space-x-3 text-left">
+                    <Info className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-amber-800 font-medium leading-relaxed">
+                      Please scan the QR code using any UPI app (PhonePe, Google Pay, etc.) and complete the payment before the timer ends.
+                    </p>
+                  </div>
+                  
+                  <button 
+                    onClick={finalizePayment}
+                    className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center space-x-2"
+                  >
+                    <span>Simulate Success</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             )}
@@ -432,7 +510,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount Paid</span>
-                      <span className="text-xl font-black text-slate-900">₹{paymentAmount.toLocaleString()}</span>
+                      <span className="text-xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Method</span>

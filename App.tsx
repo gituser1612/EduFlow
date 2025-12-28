@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './views/Login';
 import AdminDashboard from './views/AdminDashboard';
@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [showRetry, setShowRetry] = useState(false);
+  const isInitializing = useRef(false);
 
   const fetchProfile = useCallback(async (sessionUser: any): Promise<User | null> => {
     try {
@@ -35,7 +36,6 @@ const App: React.FC = () => {
 
       // 2. If profile is missing, create a skeleton record (Auto-Repair)
       if (!profile) {
-        console.log("Profile missing for user. Attempting to create fallback record...");
         const fallbackName = sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0] || 'User';
         const fallbackRole = sessionUser.user_metadata?.role || UserRole.PARENT;
 
@@ -53,7 +53,6 @@ const App: React.FC = () => {
         if (!insertError && newProfile) {
           profile = newProfile;
         } else {
-          // Final Fallback: Return a local user object even if DB insert fails
           return {
             id: sessionUser.id,
             name: fallbackName,
@@ -104,46 +103,41 @@ const App: React.FC = () => {
     return null;
   }, []);
 
-  const initialize = useCallback(async () => {
-    setLoading(true);
-    setInitError(null);
-    try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-
-      if (session?.user) {
-        const profile = await fetchProfile(session.user);
-        setUser(profile);
-      } else {
-        setUser(null);
-      }
-    } catch (err: any) {
-      console.error("Initialization failed:", err);
-      setInitError(err.message || "Network error while connecting to cloud.");
-    } finally {
-      // Ensure loading is ALWAYS false after attempts
-      setLoading(false);
-    }
-  }, [fetchProfile]);
-
   useEffect(() => {
-    initialize();
+    const initializeApp = async () => {
+      if (isInitializing.current) return;
+      isInitializing.current = true;
+      
+      setLoading(true);
+      setInitError(null);
+      
+      // Extended retry timer to account for Supabase Cold Starts (10s is safer)
+      const retryTimer = setTimeout(() => {
+        setShowRetry(true);
+      }, 10000);
 
-    // Show retry after 6s (faster response for user)
-    const retryTimer = setTimeout(() => {
-      if (loading) setShowRetry(true);
-    }, 6000);
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth State Changed:", event);
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
-        setLoading(true);
-        try {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
           const profile = await fetchProfile(session.user);
           setUser(profile);
-        } finally {
-          setLoading(false);
         }
+      } catch (err: any) {
+        setInitError(err.message || "Failed to connect to cloud services.");
+      } finally {
+        clearTimeout(retryTimer);
+        setLoading(false);
+        isInitializing.current = false;
+      }
+    };
+
+    initializeApp();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const profile = await fetchProfile(session.user);
+        setUser(profile);
+        setLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setLoading(false);
@@ -152,18 +146,12 @@ const App: React.FC = () => {
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(retryTimer);
     };
-  }, [initialize, fetchProfile]);
+  }, [fetchProfile]);
 
   const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-    } catch (err) {
-      console.error("Logout error:", err);
-      setUser(null); 
-    }
+    await supabase.auth.signOut();
+    setUser(null);
   };
 
   if (loading) return (
@@ -176,7 +164,7 @@ const App: React.FC = () => {
         <h2 className="text-slate-900 font-black tracking-widest uppercase text-sm">Synchronizing Cloud</h2>
         <p className="text-slate-400 text-xs font-medium max-w-[240px] mx-auto leading-relaxed">
           {showRetry 
-            ? "Database is responding slowly. Please wait or try refreshing the page."
+            ? "Database is waking up from sleep mode. This usually takes 10-15 seconds on the first load."
             : "Verifying credentials and loading your personal dashboard..."}
         </p>
       </div>
@@ -189,12 +177,6 @@ const App: React.FC = () => {
           >
             <RefreshCw className="w-4 h-4" />
             <span>Force Refresh</span>
-          </button>
-          <button 
-            onClick={() => setLoading(false)}
-            className="text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-indigo-600 transition-colors"
-          >
-            Skip Loading
           </button>
         </div>
       )}
