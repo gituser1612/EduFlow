@@ -274,14 +274,14 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
               const { data: { user } } = await supabase.auth.getUser();
               await supabase.from('profiles').update({ linked_id: data.id }).eq('id', user?.id);
               setActiveStudentId(data.id);
-            } else { setLinkError("Roll Number not found."); }
+            } else { setLinkError("Roll Number not found. Please contact your institute administration."); }
             setIsLinking(false);
           }} className="space-y-6">
-            <input type="text" value={linkRollNo} onChange={(e) => setLinkRollNo(e.target.value)} placeholder="Student Roll No" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 text-xl font-bold focus:border-indigo-500 outline-none transition-all" required />
+            <input type="text" value={linkRollNo} onChange={(e) => setLinkRollNo(e.target.value)} placeholder="Student Roll No" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 text-xl font-bold text-slate-900 focus:border-indigo-500 outline-none transition-all" required />
             <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center space-x-2">
               {isLinking ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Link Profile</span>}
             </button>
-            {linkError && <p className="text-rose-500 text-center font-bold text-sm">{linkError}</p>}
+            {linkError && <p className="text-rose-500 text-center font-bold text-sm leading-relaxed">{linkError}</p>}
           </form>
 
           <div className="mt-8 pt-8 border-t border-slate-100">
@@ -610,6 +610,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                   >
                     <FileText className="w-4 h-4" />
                     <span>Download Receipt PDF</span>
+                    
                   </button>
                 </div>
               </div>
