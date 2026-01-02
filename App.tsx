@@ -12,10 +12,15 @@ import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import { User, UserRole } from './types';
 import { supabase } from './supabase';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, Sparkles, Loader2 } from 'lucide-react';
+
+const STORAGE_KEY = 'eduflow_session_cache';
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    return cached ? JSON.parse(cached) : null;
+  });
   const [loading, setLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [showRetry, setShowRetry] = useState(false);
@@ -23,23 +28,17 @@ const App: React.FC = () => {
 
   const fetchProfile = useCallback(async (sessionUser: any): Promise<User | null> => {
     try {
-      // 1. Try to fetch existing profile
-      let { data: profile, error } = await supabase
+      let { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
         .maybeSingle();
         
-      if (error) {
-        console.warn("Database error fetching profile:", error.message);
-      }
-
-      // 2. If profile is missing, create a skeleton record (Auto-Repair)
       if (!profile) {
         const fallbackName = sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0] || 'User';
         const fallbackRole = sessionUser.user_metadata?.role || UserRole.PARENT;
 
-        const { data: newProfile, error: insertError } = await supabase
+        const { data: newProfile } = await supabase
           .from('profiles')
           .insert([{
             id: sessionUser.id,
@@ -50,83 +49,79 @@ const App: React.FC = () => {
           .select()
           .maybeSingle();
 
-        if (!insertError && newProfile) {
-          profile = newProfile;
-        } else {
-          return {
-            id: sessionUser.id,
-            name: fallbackName,
-            role: fallbackRole as UserRole,
-            email: sessionUser.email,
-            linkedId: null
-          };
-        }
+        profile = newProfile;
       }
 
       if (profile) {
-        let linkedId = profile.linked_id;
-
-        // 3. AUTO-LINKING LOGIC (Only if not already linked)
-        if (!linkedId) {
-          try {
-            if (profile.role === UserRole.TEACHER) {
-              const { data: teacher } = await supabase
-                .from('teachers').select('id').ilike('email', profile.email).maybeSingle();
-              if (teacher) {
-                linkedId = teacher.id;
-                await supabase.from('profiles').update({ linked_id: teacher.id }).eq('id', sessionUser.id);
-              }
-            } else if (profile.role === UserRole.PARENT) {
-              const { data: student } = await supabase
-                .from('students').select('id').ilike('parent_email', profile.email).maybeSingle();
-              if (student) {
-                linkedId = student.id;
-                await supabase.from('profiles').update({ linked_id: student.id }).eq('id', sessionUser.id);
-              }
-            }
-          } catch (linkErr) {
-            console.error("Auto-linking failed safely:", linkErr);
-          }
-        }
-
-        return {
+        const userData: User = {
           id: profile.id,
           name: profile.name || 'User',
           role: (profile.role as UserRole) || UserRole.PARENT,
           email: profile.email,
-          linkedId: linkedId || null
+          linkedId: profile.linked_id || null
         };
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+        if (!userData.linkedId) {
+          backgroundAutoLink(userData);
+        }
+        return userData;
       }
     } catch (err) {
-      console.error("Critical Profile Fetch Exception:", err);
+      console.error("Profile Fetch Exception:", err);
     }
     return null;
   }, []);
+
+  const backgroundAutoLink = async (currentUser: User) => {
+    try {
+      let linkedId = null;
+      if (currentUser.role === UserRole.TEACHER) {
+        const { data: teacher } = await supabase
+          .from('teachers').select('id').ilike('email', currentUser.email).maybeSingle();
+        linkedId = teacher?.id;
+      } else if (currentUser.role === UserRole.PARENT) {
+        const { data: student } = await supabase
+          .from('students').select('id').ilike('parent_email', currentUser.email).maybeSingle();
+        linkedId = student?.id;
+      }
+
+      if (linkedId) {
+        await supabase.from('profiles').update({ linked_id: linkedId }).eq('id', currentUser.id);
+        const updated = { ...currentUser, linkedId };
+        setUser(updated);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      }
+    } catch (e) {
+      console.debug("Background linking skipped", e);
+    }
+  };
 
   useEffect(() => {
     const initializeApp = async () => {
       if (isInitializing.current) return;
       isInitializing.current = true;
-      
       setLoading(true);
-      setInitError(null);
-      
-      // Extended retry timer to account for Supabase Cold Starts (10s is safer)
+
       const retryTimer = setTimeout(() => {
         setShowRetry(true);
-      }, 10000);
+      }, 6000);
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const profile = await fetchProfile(session.user);
           setUser(profile);
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+          setUser(null);
         }
       } catch (err: any) {
-        setInitError(err.message || "Failed to connect to cloud services.");
+        setInitError("Cloud synchronization interrupted.");
       } finally {
         clearTimeout(retryTimer);
-        setLoading(false);
+        // Delay finish to show animation
+        setTimeout(() => setLoading(false), 800);
         isInitializing.current = false;
       }
     };
@@ -139,47 +134,58 @@ const App: React.FC = () => {
         setUser(profile);
         setLoading(false);
       } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem(STORAGE_KEY);
         setUser(null);
         setLoading(false);
       }
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, [fetchProfile]);
 
   const handleLogout = async () => {
+    localStorage.removeItem(STORAGE_KEY);
     await supabase.auth.signOut();
     setUser(null);
   };
 
   if (loading) return (
-    <div className="h-screen flex flex-col items-center justify-center space-y-6 bg-white px-6">
+    <div className="h-screen flex flex-col items-center justify-center space-y-8 bg-white px-6">
       <div className="relative">
-        <div className="w-16 h-16 border-4 border-slate-100 rounded-full animate-pulse"></div>
-        <div className="absolute inset-0 w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-24 h-24 bg-indigo-600 rounded-[2.5rem] animate-float flex items-center justify-center shadow-2xl shadow-indigo-100">
+           <Sparkles className="text-white w-10 h-10 animate-pulse" />
+        </div>
+        <div className="absolute -inset-6 border-2 border-indigo-50 border-dashed rounded-full animate-[spin_15s_linear_infinite]"></div>
       </div>
-      <div className="text-center space-y-2">
-        <h2 className="text-slate-900 font-black tracking-widest uppercase text-sm">Synchronizing Cloud</h2>
-        <p className="text-slate-400 text-xs font-medium max-w-[240px] mx-auto leading-relaxed">
-          {showRetry 
-            ? "Database is waking up from sleep mode. This usually takes 10-15 seconds on the first load."
-            : "Verifying credentials and loading your personal dashboard..."}
-        </p>
+      <div className="text-center space-y-4">
+        <h2 className="text-slate-900 font-black tracking-tighter text-2xl">EduFlow Academy</h2>
+        <div className="flex flex-col items-center space-y-2">
+          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest animate-pulse">
+            {showRetry ? "Establishing secure link..." : "Initializing Academic Environment..."}
+          </p>
+          <div className="w-32 h-1 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full bg-indigo-600 animate-[loading_2s_ease-in-out_infinite]" style={{ width: '40%' }}></div>
+          </div>
+        </div>
       </div>
 
       {showRetry && (
-        <div className="flex flex-col space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
           <button 
             onClick={() => window.location.reload()}
-            className="flex items-center justify-center space-x-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold text-sm shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all"
+            className="flex items-center space-x-3 px-10 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-black transition-all active:scale-95"
           >
             <RefreshCw className="w-4 h-4" />
-            <span>Force Refresh</span>
+            <span>Wake System</span>
           </button>
         </div>
       )}
+      <style>{`
+        @keyframes loading {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(250%); }
+        }
+      `}</style>
     </div>
   );
 
@@ -189,18 +195,18 @@ const App: React.FC = () => {
 
   return (
     <Router>
-      <div className="flex min-h-screen bg-slate-50">
+      <div className="flex min-h-screen bg-slate-50 animate-fade-in-up">
         <Sidebar user={user} onLogout={handleLogout} />
         <div className="flex-1 flex flex-col min-w-0">
           <Navbar user={user} />
           <main className="p-4 md:p-8 overflow-y-auto">
             {initError && (
-              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-xs font-bold flex items-center justify-between">
+              <div className="mb-6 p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs font-bold flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <AlertCircle className="w-4 h-4" />
-                  <span>Connectivity Issue: {initError}</span>
+                  <span>Notice: {initError}</span>
                 </div>
-                <button onClick={() => setInitError(null)} className="opacity-50 hover:opacity-100 underline uppercase text-[10px]">Dismiss</button>
+                <button onClick={() => setInitError(null)} className="opacity-50 hover:opacity-100 uppercase text-[10px]">Dismiss</button>
               </div>
             )}
             <Routes>

@@ -44,6 +44,17 @@ const AdminStudents: React.FC = () => {
     feesDue: 0
   });
 
+  // Helper to normalize grade input (e.g., "11" -> "11th")
+  const normalizeGrade = (val: string) => {
+    let trimmed = val.trim().toLowerCase();
+    if (!trimmed) return "";
+    // If it's just a number, add 'th'
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed + 'th';
+    }
+    return trimmed;
+  };
+
   const fetchStudents = async () => {
     setIsLoading(true);
     try {
@@ -136,6 +147,7 @@ const AdminStudents: React.FC = () => {
     
     try {
       const trimmedRollNo = formData.rollNo.trim();
+      const normalizedGrade = normalizeGrade(formData.grade);
 
       // Check for duplicate roll number in local state first for instant feedback
       const localDuplicate = students.find(s => s.rollNo === trimmedRollNo && (!editingStudent || s.id !== editingStudent.id));
@@ -167,7 +179,7 @@ const AdminStudents: React.FC = () => {
 
       const payload = {
         name: formData.name.trim(),
-        grade: formData.grade.trim(),
+        grade: normalizedGrade,
         parent_name: formData.parentName.trim(),
         parent_email: formData.parentEmail.toLowerCase().trim(),
         roll_no: trimmedRollNo,

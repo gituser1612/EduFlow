@@ -25,11 +25,13 @@ import {
   ReceiptText,
   QrCode,
   Timer,
-  LogOut
+  LogOut,
+  FileText
 } from 'lucide-react';
 import AttendanceCalendar from '../components/AttendanceCalendar';
 import { Student, PaymentRecord, AttendanceRecord, AttendanceStatus } from '../types';
 import { supabase } from '../supabase';
+import { jsPDF } from 'jspdf';
 
 interface ParentDashboardProps {
   studentId: string | null;
@@ -52,12 +54,13 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
   const [paymentStep, setPaymentStep] = useState<'form' | 'gateway' | 'success'>('form');
 
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [receiptAmount, setReceiptAmount] = useState<number>(0); // Fixed 0 amount bug
+  const [receiptAmount, setReceiptAmount] = useState<number>(0); 
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Card' | 'Cash'>('UPI');
   const [lastReceipt, setLastReceipt] = useState<string>('');
+  const [lastPaymentDate, setLastPaymentDate] = useState<string>('');
   
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(240); // 4 minutes
+  const [timeLeft, setTimeLeft] = useState(240); 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = async (id: string) => {
@@ -74,14 +77,13 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
         teacherId: sData.teacher_id,
         parentId: ''
       });
-      // Don't reset paymentAmount if it's already set to prevent UI flicker
       setPaymentAmount(prev => prev === 0 ? (sData.fees_due ?? 0) : prev);
 
       const { data: aData } = await supabase.from('attendance').select('*').eq('student_id', id).order('date', { ascending: false });
       if (aData) setAttendance(aData.map(a => ({ id: a.id, studentId: a.student_id, date: a.date, status: a.status as AttendanceStatus, notes: a.notes })));
 
       const { data: pData } = await supabase.from('payments').select('*').eq('student_id', id).order('date', { ascending: false });
-      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receiptNo: p.receipt_no })));
+      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receipt_no: p.receipt_no })));
     }
     setIsLoading(false);
   };
@@ -94,7 +96,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     }
   }, [activeStudentId]);
 
-  // Timer logic for Gateway step
   useEffect(() => {
     if (paymentStep === 'gateway' && timeLeft > 0) {
       timerRef.current = setInterval(() => {
@@ -113,7 +114,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
   const startPayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!student || paymentAmount <= 0) return;
-    setReceiptAmount(paymentAmount); // Capture the amount for receipt before any state resets
+    setReceiptAmount(paymentAmount); 
     setPaymentStep('gateway');
     setTimeLeft(240);
   };
@@ -121,18 +122,18 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
   const finalizePayment = async () => {
     if (!student || receiptAmount <= 0) return;
     
-    // Switch to a temporary processing state within the UI if needed, 
-    // but here we move directly to finalizing for the demo
     const receiptNo = `RCP-${Math.floor(Math.random() * 900000) + 100000}`;
+    const today = new Date().toISOString().split('T')[0];
     setLastReceipt(receiptNo);
+    setLastPaymentDate(new Date().toLocaleString());
 
     const newPayment = {
       student_id: student.id,
       amount: receiptAmount,
       method: paymentMethod,
-      term: 'Quarterly Fees',
+      term: 'Tuition Fees',
       receipt_no: receiptNo,
-      date: new Date().toISOString().split('T')[0]
+      date: today
     };
 
     const { error: pError } = await supabase.from('payments').insert([newPayment]);
@@ -142,13 +143,90 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
       
       setStudent(prev => prev ? { ...prev, feesDue: newBalance } : null);
       setPaymentStep('success');
-      // Refresh historical data
-      const { data: pData } = await supabase.from('payments').select('*').eq('student_id', student.id).order('date', { ascending: false });
-      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receiptNo: p.receipt_no })));
+      fetchData(student.id);
     } else {
       alert(pError.message);
       setPaymentStep('form');
     }
+  };
+
+  const generateReceiptPDF = () => {
+    if (!student) return;
+
+    const doc = new jsPDF();
+    const margin = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Header
+    doc.setFillColor(79, 70, 229); // Indigo-600
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.setFont('helvetica', 'bold');
+    doc.text('EduFlow Academy', margin, 25);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('FEE PAYMENT RECEIPT', pageWidth - margin - 40, 25);
+
+    // Institute Details
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(9);
+    doc.text('123 Education Lane, Tech City, 560001', margin, 50);
+    doc.text('Contact: +91 98765 43210 | support@eduflow.com', margin, 55);
+    
+    // Receipt Info
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Receipt ID: ${lastReceipt}`, pageWidth - margin - 50, 50);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, pageWidth - margin - 50, 55);
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, 65, pageWidth - margin, 65);
+
+    // Student Information
+    doc.setFontSize(12);
+    doc.text('Student Details', margin, 75);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Name: ${student.name}`, margin, 85);
+    doc.text(`Roll No: ${student.rollNo}`, margin, 90);
+    doc.text(`Class: ${student.grade}`, margin, 95);
+
+    // Transaction Details Table
+    doc.setFillColor(248, 250, 252);
+    doc.rect(margin, 105, pageWidth - (margin * 2), 40, 'F');
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Description', margin + 5, 115);
+    doc.text('Amount (INR)', pageWidth - margin - 35, 115);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.line(margin + 5, 118, pageWidth - margin - 5, 118);
+    doc.text('School Tuition Fees - Academic Term', margin + 5, 128);
+    doc.text(`Rs. ${receiptAmount.toLocaleString()}`, pageWidth - margin - 35, 128);
+    
+    // Footer Total
+    doc.line(margin + 5, 135, pageWidth - margin - 5, 135);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Paid', margin + 5, 142);
+    doc.text(`Rs. ${receiptAmount.toLocaleString()}`, pageWidth - margin - 35, 142);
+
+    // Metadata
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Payment Mode: ${paymentMethod}`, margin, 160);
+    doc.text(`Transaction Time: ${lastPaymentDate}`, margin, 165);
+    doc.text(`Status: Verified Successfully`, margin, 170);
+
+    // Signature Area
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(10);
+    doc.text('Authorized Signatory', pageWidth - margin - 45, 190);
+    doc.setFontSize(7);
+    doc.text('This is a computer generated receipt.', margin, pageWidth + 20);
+
+    doc.save(`EduFlow_Receipt_${lastReceipt}.pdf`);
   };
 
   const closePaymentModal = () => {
@@ -172,7 +250,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
   if (isLoading) return (
     <div className="h-96 flex flex-col items-center justify-center space-y-4">
-      <div className="w-12 h-12 border-4 border-slate-100 border-t-indigo-600 rounded-full animate-spin"></div>
+      <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
       <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Connecting Portal...</p>
     </div>
   );
@@ -356,7 +434,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                   <tbody className="divide-y divide-slate-50">
                     {payments.map(p => (
                       <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-8 py-6 text-sm font-black text-indigo-600">{p.receiptNo}</td>
+                        <td className="px-8 py-6 text-sm font-black text-indigo-600">{p.receipt_no || 'Pending'}</td>
                         <td className="px-8 py-6 text-sm font-bold text-slate-600">{p.date}</td>
                         <td className="px-8 py-6 text-xs font-bold text-slate-400">{p.method}</td>
                         <td className="px-8 py-6 text-sm font-black text-emerald-600 text-right">₹{(p.amount ?? 0).toLocaleString()}</td>
@@ -516,13 +594,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Method</span>
                       <span className="text-xs font-bold text-slate-600">{paymentMethod} Gateway</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</span>
-                      <span className="flex items-center text-xs font-bold text-emerald-600">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        Completed
-                      </span>
-                    </div>
                   </div>
                 </div>
 
@@ -534,9 +605,10 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                     <span>Back to Dashboard</span>
                   </button>
                   <button 
+                    onClick={generateReceiptPDF}
                     className="w-full py-4 bg-white text-indigo-600 border border-indigo-100 rounded-2xl font-black text-xs hover:bg-indigo-50 transition-all flex items-center justify-center space-x-2"
                   >
-                    <Download className="w-4 h-4" />
+                    <FileText className="w-4 h-4" />
                     <span>Download Receipt PDF</span>
                   </button>
                 </div>

@@ -41,6 +41,17 @@ const AdminTeachers: React.FC = () => {
     email: ''
   });
 
+  // Helper to normalize grade input (e.g., "11" -> "11th")
+  const normalizeGrade = (val: string) => {
+    let trimmed = val.trim().toLowerCase();
+    if (!trimmed) return "";
+    // If it's just a number, add 'th'
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed + 'th';
+    }
+    return trimmed;
+  };
+
   const fetchTeachers = async () => {
     setIsLoading(true);
     try {
@@ -148,7 +159,7 @@ const AdminTeachers: React.FC = () => {
     const teacher = teachers.find(t => t.id === teacherId);
     if (!teacher) return;
 
-    const normalizedClass = newClass.trim();
+    const normalizedClass = normalizeGrade(newClass);
     const updatedClasses = [...new Set([...teacher.assignedClasses, normalizedClass])];
     
     try {

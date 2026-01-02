@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -12,25 +13,47 @@
       body {
         font-family: 'Plus Jakarta Sans', sans-serif;
         background-color: #f8fafc;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
       }
+      body::-webkit-scrollbar {
+        display: none;
+      }
+      
+      * {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+
       @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
+        from { opacity: 0; transform: translateY(20px) scale(0.98); filter: blur(10px); }
+        to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
       }
       @keyframes float {
         0% { transform: translateY(0px); }
         50% { transform: translateY(-10px); }
         100% { transform: translateY(0px); }
       }
+      @keyframes pulse-glow {
+        0%, 100% { opacity: 0.5; filter: blur(20px); }
+        50% { opacity: 0.8; filter: blur(30px); }
+      }
       .animate-fade-in-up {
-        animation: fadeInUp 0.8s ease-out forwards;
+        animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
       }
       .animate-float {
         animation: float 4s ease-in-out infinite;
       }
-      .stagger-1 { animation-delay: 0.1s; }
-      .stagger-2 { animation-delay: 0.3s; }
-      .stagger-3 { animation-delay: 0.5s; }
+      
+      .chart-container-dark {
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      }
     </style>
     <script type="importmap">
     {
@@ -43,7 +66,8 @@
         "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
         "react-dom": "https://esm.sh/react-dom@^19.2.3",
         "recharts": "https://esm.sh/recharts@^3.6.0",
-        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.48.1"
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.48.1",
+        "jspdf": "https://esm.sh/jspdf@2.5.1"
       }
     }
     </script>
