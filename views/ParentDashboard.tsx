@@ -1,24 +1,19 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Calendar, 
   CreditCard, 
   Download, 
   AlertCircle,
-  TrendingUp,
   X,
   CheckCircle,
   Smartphone,
   CreditCard as CardIcon,
-  ChevronDown,
   ArrowRight,
   ShieldCheck,
   Loader2,
   History,
   Info,
   BadgeCheck,
-  UserPlus,
-  Search,
   GraduationCap,
   Sparkles,
   Zap,
@@ -83,7 +78,15 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
       if (aData) setAttendance(aData.map(a => ({ id: a.id, studentId: a.student_id, date: a.date, status: a.status as AttendanceStatus, notes: a.notes })));
 
       const { data: pData } = await supabase.from('payments').select('*').eq('student_id', id).order('date', { ascending: false });
-      if (pData) setPayments(pData.map(p => ({ id: p.id, studentId: p.student_id, amount: p.amount ?? 0, date: p.date, method: p.method as any, term: p.term, receipt_no: p.receipt_no })));
+      if (pData) setPayments(pData.map(p => ({ 
+        id: p.id, 
+        studentId: p.student_id, 
+        amount: p.amount ?? 0, 
+        date: p.date, 
+        method: p.method as any, 
+        term: p.term, 
+        receiptNo: p.receipt_no 
+      })));
     }
     setIsLoading(false);
   };
@@ -157,8 +160,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     const margin = 20;
     const pageWidth = doc.internal.pageSize.getWidth();
     
-    // Header
-    doc.setFillColor(79, 70, 229); // Indigo-600
+    doc.setFillColor(79, 70, 229);
     doc.rect(0, 0, pageWidth, 40, 'F');
     
     doc.setTextColor(255, 255, 255);
@@ -170,13 +172,11 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     doc.setFont('helvetica', 'normal');
     doc.text('FEE PAYMENT RECEIPT', pageWidth - margin - 40, 25);
 
-    // Institute Details
     doc.setTextColor(51, 65, 85);
     doc.setFontSize(9);
     doc.text('123 Education Lane, Tech City, 560001', margin, 50);
     doc.text('Contact: +91 98765 43210 | support@eduflow.com', margin, 55);
     
-    // Receipt Info
     doc.setFont('helvetica', 'bold');
     doc.text(`Receipt ID: ${lastReceipt}`, pageWidth - margin - 50, 50);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, pageWidth - margin - 50, 55);
@@ -184,7 +184,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     doc.setDrawColor(226, 232, 240);
     doc.line(margin, 65, pageWidth - margin, 65);
 
-    // Student Information
     doc.setFontSize(12);
     doc.text('Student Details', margin, 75);
     doc.setFontSize(10);
@@ -193,7 +192,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     doc.text(`Roll No: ${student.rollNo}`, margin, 90);
     doc.text(`Class: ${student.grade}`, margin, 95);
 
-    // Transaction Details Table
     doc.setFillColor(248, 250, 252);
     doc.rect(margin, 105, pageWidth - (margin * 2), 40, 'F');
     
@@ -206,26 +204,21 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
     doc.text('School Tuition Fees - Academic Term', margin + 5, 128);
     doc.text(`Rs. ${receiptAmount.toLocaleString()}`, pageWidth - margin - 35, 128);
     
-    // Footer Total
     doc.line(margin + 5, 135, pageWidth - margin - 5, 135);
     doc.setFont('helvetica', 'bold');
     doc.text('Total Paid', margin + 5, 142);
     doc.text(`Rs. ${receiptAmount.toLocaleString()}`, pageWidth - margin - 35, 142);
 
-    // Metadata
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
     doc.text(`Payment Mode: ${paymentMethod}`, margin, 160);
     doc.text(`Transaction Time: ${lastPaymentDate}`, margin, 165);
     doc.text(`Status: Verified Successfully`, margin, 170);
 
-    // Signature Area
     doc.setTextColor(51, 65, 85);
     doc.setFontSize(10);
     doc.text('Authorized Signatory', pageWidth - margin - 45, 190);
-    doc.setFontSize(7);
-    doc.text('This is a computer generated receipt.', margin, pageWidth + 20);
-
+    
     doc.save(`EduFlow_Receipt_${lastReceipt}.pdf`);
   };
 
@@ -248,6 +241,68 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
 
   const attendancePercentage = attendance.length > 0 ? Math.round((attendance.filter(a => a.status === 'PRESENT').length / attendance.length) * 100) : 100;
 
+  const handleLinkStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLinking(true);
+    setLinkError(null);
+    
+    try {
+      // 1. Verify student exists with this roll number
+      const { data: studentData, error: studentFetchError } = await supabase
+        .from('students')
+        .select('id')
+        .eq('roll_no', linkRollNo)
+        .maybeSingle();
+      
+      if (studentFetchError) throw studentFetchError;
+
+      if (!studentData) {
+        setLinkError("Roll Number not found. Please contact your institute administration.");
+        setIsLinking(false);
+        return;
+      }
+
+      // 2. Data Integrity: Check if this student is already linked to another user profile
+      const { data: existingLink, error: profileCheckError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .eq('linked_id', studentData.id)
+        .maybeSingle();
+
+      if (profileCheckError) throw profileCheckError;
+
+      if (existingLink) {
+        setLinkError("Student with this roll number is already associate with one parent account. Please contact institute administration");
+        setIsLinking(false);
+        return;
+      }
+
+      // 3. Link student to current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLinkError("Session expired. Please sign in again.");
+        setIsLinking(false);
+        return;
+      }
+
+      const { error: linkError } = await supabase
+        .from('profiles')
+        .update({ linked_id: studentData.id })
+        .eq('id', user.id);
+
+      if (linkError) throw linkError;
+
+      // Success - update state
+      setActiveStudentId(studentData.id);
+
+    } catch (err: any) {
+      setLinkError("Student with this roll number is already associate with one parent account. Please contact institute administration");
+      console.error("Linking Error:", err);
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
   if (isLoading) return (
     <div className="h-96 flex flex-col items-center justify-center space-y-4">
       <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
@@ -266,29 +321,27 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
           <p className="text-slate-500 font-medium">Please enter the roll number provided by the institute.</p>
         </div>
         <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50">
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            setIsLinking(true);
-            const { data } = await supabase.from('students').select('id').eq('roll_no', linkRollNo).single();
-            if (data) {
-              const { data: { user } } = await supabase.auth.getUser();
-              await supabase.from('profiles').update({ linked_id: data.id }).eq('id', user?.id);
-              setActiveStudentId(data.id);
-            } else { setLinkError("Roll Number not found. Please contact your institute administration."); }
-            setIsLinking(false);
-          }} className="space-y-6">
-            <input type="text" value={linkRollNo} onChange={(e) => setLinkRollNo(e.target.value)} placeholder="Student Roll No" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 text-xl font-bold text-slate-900 focus:border-indigo-500 outline-none transition-all" required />
-            <button type="submit" className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center space-x-2">
+          <form onSubmit={handleLinkStudent} className="space-y-6">
+            <input 
+              type="text" 
+              value={linkRollNo} 
+              onChange={(e) => setLinkRollNo(e.target.value)} 
+              placeholder="Student Roll No" 
+              className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 text-xl font-bold text-slate-900 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300" 
+              required 
+            />
+            <button 
+              type="submit" 
+              disabled={isLinking}
+              className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+            >
               {isLinking ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Link Profile</span>}
             </button>
             {linkError && <p className="text-rose-500 text-center font-bold text-sm leading-relaxed">{linkError}</p>}
           </form>
 
           <div className="mt-8 pt-8 border-t border-slate-100">
-            <button 
-              onClick={handleSignOut}
-              className="w-full py-4 text-slate-400 hover:text-rose-600 font-bold text-sm flex items-center justify-center space-x-2 transition-colors"
-            >
+            <button onClick={handleSignOut} className="w-full py-4 text-slate-400 hover:text-rose-600 font-bold text-sm flex items-center justify-center space-x-2 transition-colors">
               <LogOut className="w-4 h-4" />
               <span>Not your account? Sign Out</span>
             </button>
@@ -411,12 +464,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                       <p className="text-5xl font-black tracking-tight">₹{(student.feesDue ?? 0).toLocaleString()}</p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => setIsPaymentModalOpen(true)} 
-                    className="bg-white text-indigo-600 px-12 py-5 rounded-2xl font-black text-lg shadow-xl hover:scale-105 active:scale-95 transition-all"
-                  >
-                    Pay Balance Now
-                  </button>
+                  <button onClick={() => setIsPaymentModalOpen(true)} className="bg-white text-indigo-600 px-12 py-5 rounded-2xl font-black text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">Pay Balance Now</button>
                 </div>
               </div>
             )}
@@ -434,7 +482,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                   <tbody className="divide-y divide-slate-50">
                     {payments.map(p => (
                       <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-8 py-6 text-sm font-black text-indigo-600">{p.receipt_no || 'Pending'}</td>
+                        <td className="px-8 py-6 text-sm font-black text-indigo-600">{p.receiptNo || 'Pending'}</td>
                         <td className="px-8 py-6 text-sm font-bold text-slate-600">{p.date}</td>
                         <td className="px-8 py-6 text-xs font-bold text-slate-400">{p.method}</td>
                         <td className="px-8 py-6 text-sm font-black text-emerald-600 text-right">₹{(p.amount ?? 0).toLocaleString()}</td>
@@ -452,9 +500,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                  <ShieldCheck className="w-6 h-6" />
                </div>
                <h4 className="font-black text-slate-900 mb-2">Bank-Grade Security</h4>
-               <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                 All transactions are secured with 256-bit SSL encryption. Digital receipts are generated instantly and stored for your records.
-               </p>
+               <p className="text-xs text-slate-500 font-medium leading-relaxed">All transactions are secured with 256-bit SSL encryption. Digital receipts are generated instantly.</p>
             </div>
           </div>
         </div>
@@ -465,7 +511,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={closePaymentModal}></div>
           <div className="relative bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden min-h-[500px] flex flex-col transition-all">
             
-            {/* Step 1: Form */}
             {paymentStep === 'form' && (
               <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex items-center justify-between">
@@ -477,142 +522,45 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ studentId: initialStu
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Amount</label>
                   <div className="flex items-center">
                     <span className="text-2xl font-black text-slate-400 mr-2">₹</span>
-                    <input 
-                      type="number" 
-                      className="bg-transparent w-full text-4xl font-black text-slate-900 outline-none" 
-                      value={paymentAmount} 
-                      max={student.feesDue} 
-                      onChange={e => setPaymentAmount(parseInt(e.target.value) || 0)} 
-                      required 
-                    />
+                    <input type="number" className="bg-transparent w-full text-4xl font-black text-slate-900 outline-none" value={paymentAmount} max={student.feesDue} onChange={e => setPaymentAmount(parseInt(e.target.value) || 0)} required />
                   </div>
                 </div>
 
                 <div className="space-y-4">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payment Method</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => setPaymentMethod('UPI')}
-                      className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${paymentMethod === 'UPI' ? 'border-indigo-600 bg-indigo-50 text-indigo-600 shadow-inner' : 'border-slate-100 text-slate-400 hover:border-indigo-200'}`}
-                    >
-                      <Smartphone className="w-6 h-6" />
-                      <span className="text-xs font-black">UPI / Scan</span>
-                    </button>
-                    <button 
-                      onClick={() => setPaymentMethod('Card')}
-                      className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${paymentMethod === 'Card' ? 'border-indigo-600 bg-indigo-50 text-indigo-600 shadow-inner' : 'border-slate-100 text-slate-400 hover:border-indigo-200'}`}
-                    >
-                      <CardIcon className="w-6 h-6" />
-                      <span className="text-xs font-black">Bank Card</span>
-                    </button>
+                    <button onClick={() => setPaymentMethod('UPI')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${paymentMethod === 'UPI' ? 'border-indigo-600 bg-indigo-50 text-indigo-600' : 'border-slate-100 text-slate-400 hover:border-indigo-200'}`}><Smartphone className="w-6 h-6" /><span className="text-xs font-black">UPI / Scan</span></button>
+                    <button onClick={() => setPaymentMethod('Card')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${paymentMethod === 'Card' ? 'border-indigo-600 bg-indigo-50 text-indigo-600' : 'border-slate-100 text-slate-400 hover:border-indigo-200'}`}><CardIcon className="w-6 h-6" /><span className="text-xs font-black">Bank Card</span></button>
                   </div>
                 </div>
 
-                <button 
-                  onClick={startPayment} 
-                  disabled={paymentAmount <= 0}
-                  className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
-                >
-                  <ShieldCheck className="w-5 h-5" />
-                  <span>Authorize & Pay</span>
-                </button>
+                <button onClick={startPayment} disabled={paymentAmount <= 0} className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-indigo-100 flex items-center justify-center space-x-3 disabled:opacity-50"><ShieldCheck className="w-5 h-5" /><span>Authorize & Pay</span></button>
               </div>
             )}
 
-            {/* Step 2: Gateway (QR & Timer) */}
             {paymentStep === 'gateway' && (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6 animate-in zoom-in-95 duration-500">
                 <div className="flex items-center justify-between w-full mb-4">
-                   <div className="flex items-center space-x-2 text-indigo-600">
-                      <Timer className="w-5 h-5 animate-pulse" />
-                      <span className="text-xl font-black font-mono">{formatTime(timeLeft)}</span>
-                   </div>
+                   <div className="flex items-center space-x-2 text-indigo-600"><Timer className="w-5 h-5 animate-pulse" /><span className="text-xl font-black font-mono">{formatTime(timeLeft)}</span></div>
                    <button onClick={closePaymentModal} className="p-2 text-slate-300 hover:text-rose-500 transition-colors"><X className="w-5 h-5" /></button>
                 </div>
-
                 <div className="relative group">
-                  <div className="w-56 h-56 bg-white rounded-3xl border-2 border-indigo-600 p-6 shadow-2xl shadow-indigo-100 flex items-center justify-center relative overflow-hidden">
-                    <QrCode className="w-full h-full text-slate-900" />
-                    <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                       <span className="bg-indigo-600 text-white px-4 py-2 rounded-full text-xs font-black shadow-lg">Scan to Pay</span>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-col items-center">
-                    <p className="text-2xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</p>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Order Ref: {Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
-                  </div>
+                  <div className="w-56 h-56 bg-white rounded-3xl border-2 border-indigo-600 p-6 shadow-2xl flex items-center justify-center relative overflow-hidden"><QrCode className="w-full h-full text-slate-900" /></div>
+                  <div className="mt-4 flex flex-col items-center"><p className="text-2xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</p></div>
                 </div>
-
-                <div className="space-y-4 w-full">
-                  <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100 flex items-start space-x-3 text-left">
-                    <Info className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-amber-800 font-medium leading-relaxed">
-                      Please scan the QR code using any UPI app (PhonePe, Google Pay, etc.) and complete the payment before the timer ends.
-                    </p>
-                  </div>
-                  
-                  <button 
-                    onClick={finalizePayment}
-                    className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center space-x-2"
-                  >
-                    <span>Simulate Success</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
+                <button onClick={finalizePayment} className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center space-x-2"><span>Simulate Success</span><ArrowRight className="w-4 h-4" /></button>
               </div>
             )}
 
-            {/* Step 3: Success Receipt View */}
             {paymentStep === 'success' && (
               <div className="flex-1 flex flex-col p-8 space-y-6 animate-in slide-in-from-bottom-12 duration-700">
-                <div className="flex justify-center -mt-16 mb-4">
-                  <div className="w-24 h-24 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-emerald-200 border-[6px] border-white animate-bounce">
-                    <CheckCircle className="w-12 h-12" />
-                  </div>
+                <div className="flex justify-center -mt-16 mb-4"><div className="w-24 h-24 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-2xl border-[6px] border-white animate-bounce"><CheckCircle className="w-12 h-12" /></div></div>
+                <div className="text-center"><h3 className="text-3xl font-black text-slate-900">Payment Success!</h3><p className="text-emerald-600 font-black uppercase text-[10px] tracking-[0.2em] mt-1">Transaction Verified</p></div>
+                <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 shadow-inner relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-6 opacity-[0.03] rotate-12"><ReceiptText className="w-48 h-48" /></div>
+                  <div className="space-y-5 relative z-10"><div className="flex justify-between items-center border-b border-dashed border-slate-200 pb-4"><span className="text-[10px] font-black text-slate-400 uppercase">Receipt Id</span><span className="text-sm font-black text-indigo-600">{lastReceipt}</span></div><div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-400 uppercase">Amount Paid</span><span className="text-xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</span></div></div>
                 </div>
-                
-                <div className="text-center">
-                  <h3 className="text-3xl font-black text-slate-900">Payment Success!</h3>
-                  <p className="text-emerald-600 font-black uppercase text-[10px] tracking-[0.2em] mt-1">Transaction Verified</p>
-                </div>
-
-                <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 relative overflow-hidden shadow-inner">
-                  <div className="absolute top-0 right-0 p-6 opacity-[0.03] rotate-12">
-                    <ReceiptText className="w-48 h-48" />
-                  </div>
-                  
-                  <div className="space-y-5 relative z-10 font-jakarta">
-                    <div className="flex justify-between items-center border-b border-dashed border-slate-200 pb-4">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Receipt Id</span>
-                      <span className="text-sm font-black text-indigo-600">{lastReceipt}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount Paid</span>
-                      <span className="text-xl font-black text-slate-900">₹{receiptAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Method</span>
-                      <span className="text-xs font-bold text-slate-600">{paymentMethod} Gateway</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <button 
-                    onClick={closePaymentModal}
-                    className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 flex items-center justify-center space-x-2"
-                  >
-                    <span>Back to Dashboard</span>
-                  </button>
-                  <button 
-                    onClick={generateReceiptPDF}
-                    className="w-full py-4 bg-white text-indigo-600 border border-indigo-100 rounded-2xl font-black text-xs hover:bg-indigo-50 transition-all flex items-center justify-center space-x-2"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Download Receipt PDF</span>
-                    
-                  </button>
-                </div>
+                <div className="space-y-3"><button onClick={closePaymentModal} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl">Back to Dashboard</button><button onClick={generateReceiptPDF} className="w-full py-4 bg-white text-indigo-600 border border-indigo-100 rounded-2xl font-black text-xs hover:bg-indigo-50 transition-all flex items-center justify-center space-x-2"><FileText className="w-4 h-4" /><span>Download Receipt PDF</span></button></div>
               </div>
             )}
           </div>
