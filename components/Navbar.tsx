@@ -1,28 +1,40 @@
 
 import React from 'react';
-import { Bell, Search, User as UserIcon, LogOut } from 'lucide-react';
+import { Bell, Search, User as UserIcon, LogOut, Menu } from 'lucide-react';
 import { User } from '../types';
 import { supabase } from '../supabase';
 
 interface NavbarProps {
   user: User;
+  onMenuClick?: () => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ user }) => {
+const Navbar: React.FC<NavbarProps> = ({ user, onMenuClick }) => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30">
-      <div className="flex-1 max-w-md hidden sm:block">
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-          <input 
-            type="text" 
-            placeholder="Search records..." 
-            className="w-full bg-slate-50 border-none rounded-full py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-          />
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 sticky top-0 z-30">
+      <div className="flex items-center">
+        {/* Hamburger Menu for Mobile */}
+        <button 
+          onClick={onMenuClick}
+          className="p-2 mr-2 text-slate-600 hover:bg-slate-50 rounded-xl md:hidden transition-colors"
+          aria-label="Open menu"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
+
+        <div className="flex-1 max-w-md hidden sm:block">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+            <input 
+              type="text" 
+              placeholder="Search records..." 
+              className="w-full bg-slate-50 border-none rounded-full py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+            />
+          </div>
         </div>
       </div>
 
@@ -43,7 +55,6 @@ const Navbar: React.FC<NavbarProps> = ({ user }) => {
             <UserIcon className="w-5 h-5" />
           </div>
           
-          {/* Universal Logout for Mobile/Desktop */}
           <button 
             onClick={handleSignOut}
             className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"

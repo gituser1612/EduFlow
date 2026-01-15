@@ -15,7 +15,6 @@ export enum AttendanceStatus {
 export interface Student {
   id: string;
   name: string;
-  grade: string;
   parentName: string;
   parentId: string;
   teacherId: string;
@@ -28,7 +27,6 @@ export interface Teacher {
   name: string;
   subject: string;
   email?: string;
-  assignedClasses: string[];
 }
 
 export interface AttendanceRecord {

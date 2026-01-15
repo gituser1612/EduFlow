@@ -6,27 +6,25 @@ import {
   Edit2, 
   Trash2, 
   UserPlus, 
-  Download,
-  Filter,
-  CheckCircle,
-  XCircle,
-  ChevronDown,
-  Users,
-  AlertTriangle,
-  X,
-  Loader2,
-  Mail,
-  AlertCircle
+  CheckCircle, 
+  Users, 
+  AlertTriangle, 
+  X, 
+  Loader2, 
+  Mail, 
+  AlertCircle,
+  UserSquare2,
+  ChevronDown
 } from 'lucide-react';
-import { Student } from '../types';
+import { Student, Teacher } from '../types';
 import { supabase } from '../supabase';
 
 const AdminStudents: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGrade, setSelectedGrade] = useState<string>('All');
   const [feeStatusFilter, setFeeStatusFilter] = useState<'All' | 'Paid' | 'Due'>('All');
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -37,39 +35,37 @@ const AdminStudents: React.FC = () => {
 
   const [formData, setFormData] = useState({
     name: '',
-    grade: '',
     parentName: '',
     parentEmail: '',
     rollNo: '',
-    feesDue: 0
+    feesDue: 0,
+    teacherId: ''
   });
 
-  // Helper to normalize grade input (e.g., "11" -> "11th")
-  const normalizeGrade = (val: string) => {
-    let trimmed = val.trim().toLowerCase();
-    if (!trimmed) return "";
-    // If it's just a number, add 'th'
-    if (/^\d+$/.test(trimmed)) {
-      return trimmed + 'th';
-    }
-    return trimmed;
-  };
-
-  const fetchStudents = async () => {
+  const fetchInitialData = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*')
-        .order('name');
+      const [studentsRes, teachersRes] = await Promise.all([
+        supabase.from('students').select('*').order('name'),
+        supabase.from('teachers').select('*').order('name')
+      ]);
         
-      if (error) throw error;
+      if (studentsRes.error) throw studentsRes.error;
+      if (teachersRes.error) throw teachersRes.error;
 
-      if (data) {
-        const mapped: Student[] = data.map(s => ({
+      if (teachersRes.data) {
+        setTeachers(teachersRes.data.map(t => ({
+          id: t.id,
+          name: t.name,
+          subject: t.subject,
+          email: t.email
+        })));
+      }
+
+      if (studentsRes.data) {
+        const mapped: Student[] = studentsRes.data.map(s => ({
           id: s.id,
           name: s.name,
-          grade: s.grade,
           parentName: s.parent_name,
           parentId: '', 
           teacherId: s.teacher_id,
@@ -79,32 +75,26 @@ const AdminStudents: React.FC = () => {
         setStudents(mapped);
       }
     } catch (err) {
-      console.error("Fetch students error:", err);
+      console.error("Fetch data error:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchStudents();
+    fetchInitialData();
   }, []);
-
-  const availableGrades = useMemo(() => {
-    const grades = students.map(s => s.grade);
-    return ['All', ...Array.from(new Set(grades))];
-  }, [students]);
 
   const filteredStudents = useMemo(() => {
     return students.filter(s => {
       const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                            s.rollNo.includes(searchQuery);
-      const matchesGrade = selectedGrade === 'All' || s.grade === selectedGrade;
       const matchesFee = feeStatusFilter === 'All' || 
                         (feeStatusFilter === 'Paid' && (s.feesDue ?? 0) === 0) || 
                         (feeStatusFilter === 'Due' && (s.feesDue ?? 0) > 0);
-      return matchesSearch && matchesGrade && matchesFee;
+      return matchesSearch && matchesFee;
     });
-  }, [students, searchQuery, selectedGrade, feeStatusFilter]);
+  }, [students, searchQuery, feeStatusFilter]);
 
   const handleEdit = async (student: Student) => {
     setModalError(null);
@@ -112,11 +102,11 @@ const AdminStudents: React.FC = () => {
     const { data } = await supabase.from('students').select('parent_email').eq('id', student.id).single();
     setFormData({
       name: student.name,
-      grade: student.grade,
       parentName: student.parentName,
       parentEmail: data?.parent_email || '',
       rollNo: student.rollNo,
-      feesDue: student.feesDue ?? 0
+      feesDue: student.feesDue ?? 0,
+      teacherId: student.teacherId || ''
     });
     setIsModalOpen(true);
   };
@@ -147,43 +137,23 @@ const AdminStudents: React.FC = () => {
     
     try {
       const trimmedRollNo = formData.rollNo.trim();
-      const normalizedGrade = normalizeGrade(formData.grade);
 
-      // Check for duplicate roll number in local state first for instant feedback
+      // Duplicate check
       const localDuplicate = students.find(s => s.rollNo === trimmedRollNo && (!editingStudent || s.id !== editingStudent.id));
-      
       if (localDuplicate) {
         const msg = `Student "${localDuplicate.name}" already exists with Roll Number ${trimmedRollNo}.`;
         setModalError(msg);
-        alert(`Action Blocked: ${msg}`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Deep verification with Database
-      const { data: existingStudentWithRoll, error: checkError } = await supabase
-        .from('students')
-        .select('id, name')
-        .eq('roll_no', trimmedRollNo)
-        .maybeSingle();
-
-      if (checkError) throw checkError;
-
-      if (existingStudentWithRoll && (!editingStudent || existingStudentWithRoll.id !== editingStudent.id)) {
-        const msg = `Student "${existingStudentWithRoll.name}" already exists with Roll Number ${trimmedRollNo}.`;
-        setModalError(msg);
-        alert(`Action Blocked: ${msg}`);
         setIsSubmitting(false);
         return;
       }
 
       const payload = {
         name: formData.name.trim(),
-        grade: normalizedGrade,
         parent_name: formData.parentName.trim(),
         parent_email: formData.parentEmail.toLowerCase().trim(),
         roll_no: trimmedRollNo,
-        fees_due: formData.feesDue
+        fees_due: formData.feesDue,
+        teacher_id: formData.teacherId || null
       };
 
       let resultError;
@@ -202,17 +172,19 @@ const AdminStudents: React.FC = () => {
 
       if (resultError) throw resultError;
 
-      await fetchStudents();
+      await fetchInitialData();
       setIsModalOpen(false);
       setEditingStudent(null);
     } catch (err: any) {
-      console.error("Student persistence error details:", err);
-      const errorMsg = err.message || (typeof err === 'string' ? err : JSON.stringify(err));
-      setModalError(errorMsg);
-      alert(`Persistence Error: ${errorMsg}`);
+      console.error("Persistence error:", err);
+      setModalError(err.message || "Something went wrong.");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const getTeacherName = (id: string) => {
+    return teachers.find(t => t.id === id)?.name || 'Not Assigned';
   };
 
   return (
@@ -220,13 +192,13 @@ const AdminStudents: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Student Directory</h1>
-          <p className="text-slate-500 font-medium">Manage records in real-time via Supabase Cloud.</p>
+          <p className="text-slate-500 font-medium">Manage student-faculty assignments.</p>
         </div>
         <button 
           onClick={() => {
             setModalError(null);
             setEditingStudent(null);
-            setFormData({ name: '', grade: '', parentName: '', parentEmail: '', rollNo: '', feesDue: 0 });
+            setFormData({ name: '', parentName: '', parentEmail: '', rollNo: '', feesDue: 0, teacherId: '' });
             setIsModalOpen(true);
           }}
           className="flex items-center space-x-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
@@ -248,26 +220,15 @@ const AdminStudents: React.FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <select 
-              value={selectedGrade}
-              onChange={(e) => setSelectedGrade(e.target.value)}
-              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
-            >
-              {availableGrades.map(grade => (
-                <option key={grade} value={grade} className="text-slate-900 font-bold">{grade === 'All' ? 'All Classes' : `Class ${grade}`}</option>
-              ))}
-            </select>
-            <select 
-              value={feeStatusFilter}
-              onChange={(e) => setFeeStatusFilter(e.target.value as any)}
-              className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
-            >
-              <option value="All" className="text-slate-900 font-bold">All Fee Status</option>
-              <option value="Paid" className="text-slate-900 font-bold">Paid Only</option>
-              <option value="Due" className="text-slate-900 font-bold">With Dues</option>
-            </select>
-          </div>
+          <select 
+            value={feeStatusFilter}
+            onChange={(e) => setFeeStatusFilter(e.target.value as any)}
+            className="bg-slate-50 border border-slate-100 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+          >
+            <option value="All">All Fee Status</option>
+            <option value="Paid">Paid Only</option>
+            <option value="Due">With Dues</option>
+          </select>
         </div>
       </div>
 
@@ -275,7 +236,7 @@ const AdminStudents: React.FC = () => {
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
-            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Querying Students...</p>
+            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Querying Records...</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -284,7 +245,7 @@ const AdminStudents: React.FC = () => {
                 <tr>
                   <th className="px-6 py-5">Roll No</th>
                   <th className="px-6 py-5">Student</th>
-                  <th className="px-6 py-5">Grade</th>
+                  <th className="px-6 py-5">Assigned Teacher</th>
                   <th className="px-6 py-5">Fee Status</th>
                   <th className="px-6 py-5 text-right">Actions</th>
                 </tr>
@@ -302,7 +263,10 @@ const AdminStudents: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm font-bold text-slate-600 px-2 py-1 bg-slate-100 rounded-md">{student.grade}</span>
+                      <div className="flex items-center space-x-2">
+                        <UserSquare2 className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm font-bold text-slate-600">{getTeacherName(student.teacherId)}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold ${(student.feesDue ?? 0) === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
@@ -328,14 +292,14 @@ const AdminStudents: React.FC = () => {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => !isSubmitting && setIsModalOpen(false)}></div>
-          <div className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up">
+          <div className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
-              <h3 className="text-xl font-bold">{editingStudent ? 'Update Profile' : 'New Enrollment'}</h3>
+              <h3 className="text-xl font-bold">{editingStudent ? 'Update Enrollment' : 'New Enrollment'}</h3>
               <button onClick={() => !isSubmitting && setIsModalOpen(false)} className="text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-8 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-8 space-y-4">
               {modalError && (
-                <div className="bg-rose-50 border border-rose-100 text-rose-600 p-4 rounded-xl flex items-start space-x-3 mb-2 animate-in slide-in-from-top-2">
+                <div className="bg-rose-50 border border-rose-100 text-rose-600 p-4 rounded-xl flex items-start space-x-3 mb-2">
                   <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                   <p className="text-sm font-bold">{modalError}</p>
                 </div>
@@ -346,23 +310,34 @@ const AdminStudents: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Student Full Name</label>
                   <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required disabled={isSubmitting} />
                 </div>
-                <div>
+                <div className="col-span-1">
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Roll No</label>
                   <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.rollNo} onChange={e => setFormData({...formData, rollNo: e.target.value})} required disabled={isSubmitting} />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Grade / Class</label>
-                  <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.grade} onChange={e => setFormData({...formData, grade: e.target.value})} placeholder="e.g. 10th" required disabled={isSubmitting} />
+                <div className="col-span-1">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Assigned to? (Faculty)</label>
+                  <div className="relative">
+                    <select 
+                      className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" 
+                      value={formData.teacherId} 
+                      onChange={e => setFormData({...formData, teacherId: e.target.value})} 
+                      required 
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select Faculty...</option>
+                      {teachers.map(t => (
+                        <option key={t.id} value={t.id}>{t.name} ({t.subject})</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Parent Full Name</label>
                   <input className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.parentName} onChange={e => setFormData({...formData, parentName: e.target.value})} required disabled={isSubmitting} />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center justify-between">
-                    <span>Parent Email</span>
-                    <span className="text-[10px] text-indigo-500 italic lowercase">Used for parent portal login</span>
-                  </label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Parent Email</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input type="email" className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-11 pr-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500" value={formData.parentEmail} onChange={e => setFormData({...formData, parentEmail: e.target.value})} placeholder="parent@example.com" required disabled={isSubmitting} />
@@ -375,7 +350,7 @@ const AdminStudents: React.FC = () => {
               </div>
               <button type="submit" disabled={isSubmitting} className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center space-x-2 disabled:opacity-50">
                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                <span>{isSubmitting ? 'Processing...' : (editingStudent ? 'Update Database' : 'Confirm Enrollment')}</span>
+                <span>{isSubmitting ? 'Processing...' : (editingStudent ? 'Update Details' : 'Confirm Enrollment')}</span>
               </button>
             </form>
           </div>
@@ -385,15 +360,13 @@ const AdminStudents: React.FC = () => {
       {isDeleteModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsDeleteModalOpen(false)}></div>
-          <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up">
-            <div className="p-8 text-center">
-              <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 ring-8 ring-rose-50/50"><AlertTriangle className="w-10 h-10" /></div>
-              <h3 className="text-2xl font-bold text-slate-900 mb-2">Delete student?</h3>
-              <p className="text-slate-500 mb-8 leading-relaxed">Permanently delete <span className="font-bold text-slate-900">"{studentToDelete?.name}"</span> from Supabase cloud database.</p>
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setIsDeleteModalOpen(false)} className="px-6 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-all">Cancel</button>
-                <button onClick={confirmDelete} className="px-6 py-3.5 bg-rose-600 text-white font-bold rounded-2xl hover:bg-rose-700 transition-all shadow-lg shadow-rose-200">Delete Permanently</button>
-              </div>
+          <div className="relative bg-white w-full max-w-md rounded-3xl p-8 text-center space-y-6">
+            <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 ring-8 ring-rose-50/50"><AlertTriangle className="w-10 h-10" /></div>
+            <h3 className="text-2xl font-bold text-slate-900 mb-2">Delete student?</h3>
+            <p className="text-slate-500 mb-8 leading-relaxed">Permanently delete <span className="font-bold text-slate-900">"{studentToDelete?.name}"</span> from the database.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => setIsDeleteModalOpen(false)} className="px-6 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-all">Cancel</button>
+              <button onClick={confirmDelete} className="px-6 py-3.5 bg-rose-600 text-white font-bold rounded-2xl hover:bg-rose-700 transition-all">Delete Permanently</button>
             </div>
           </div>
         </div>
