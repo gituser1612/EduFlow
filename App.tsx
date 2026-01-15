@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './views/Login';
 import AdminDashboard from './views/AdminDashboard';
-import AdminStudents from './views/AdminStudents';
+import StudentManagement from './views/StudentManagement';
 import AdminTeachers from './views/AdminTeachers';
 import AdminUsers from './views/AdminUsers';
 import TeacherDashboard from './views/TeacherDashboard';
@@ -12,7 +12,7 @@ import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import { User, UserRole } from './types';
 import { supabase } from './supabase';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 const STORAGE_KEY = 'eduflow_session_cache';
 
@@ -28,18 +28,14 @@ const App: React.FC = () => {
 
   const fetchProfile = useCallback(async (sessionUser: any): Promise<User | null> => {
     try {
-      // 1. Try to fetch existing profile
       let { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
         .maybeSingle();
         
-      // 2. If profile is missing, create it
       if (!profile) {
         const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        
-        // Promotion logic: First user is ALWAYS Admin
         const fallbackRole = (count === 0) ? UserRole.ADMIN : (sessionUser.user_metadata?.role || UserRole.PARENT);
         const fallbackName = sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0] || 'User';
 
@@ -84,14 +80,12 @@ const App: React.FC = () => {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const profile = await fetchProfile(session.user);
-          if (profile) {
-            setUser(profile);
-          }
+          if (profile) setUser(profile);
         } else {
           localStorage.removeItem(STORAGE_KEY);
           setUser(null);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Session verification failed:", err);
       } finally {
         setLoading(false);
@@ -157,7 +151,7 @@ const App: React.FC = () => {
                 <>
                   <Route path="/" element={<AdminDashboard />} />
                   <Route path="/admin" element={<AdminDashboard />} />
-                  <Route path="/admin/students" element={<AdminStudents />} />
+                  <Route path="/admin/students" element={<StudentManagement role={UserRole.ADMIN} />} />
                   <Route path="/admin/teachers" element={<AdminTeachers />} />
                   <Route path="/admin/users" element={<AdminUsers />} />
                   <Route path="*" element={<Navigate to="/admin" />} />
@@ -167,6 +161,7 @@ const App: React.FC = () => {
                 <>
                   <Route path="/" element={<TeacherDashboard teacherId={user.linkedId!} />} />
                   <Route path="/teacher" element={<TeacherDashboard teacherId={user.linkedId!} />} />
+                  <Route path="/teacher/students" element={<StudentManagement role={UserRole.TEACHER} currentUserId={user.linkedId!} />} />
                   <Route path="*" element={<Navigate to="/teacher" />} />
                 </>
               )}
