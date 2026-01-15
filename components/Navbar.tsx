@@ -10,9 +10,33 @@ interface NavbarProps {
 }
 
 const Navbar: React.FC<NavbarProps> = ({ user, onMenuClick }) => {
-  const handleSignOut = async () => {
+  const hardLogout = async () => {
+  try {
     await supabase.auth.signOut();
-  };
+
+    localStorage.clear();
+    sessionStorage.clear();
+
+    document.cookie.split(";").forEach((cookie) => {
+      document.cookie = cookie
+        .replace(/^ +/, "")
+        .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+    });
+
+    if (window.indexedDB) {
+      const dbs = await indexedDB.databases();
+      dbs.forEach((db) => {
+        if (db.name) indexedDB.deleteDatabase(db.name);
+      });
+    }
+
+    window.location.replace("/");
+  } catch (err) {
+    console.error("Logout Error:", err);
+    window.location.replace("/");
+  }
+};
+
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 sticky top-0 z-30">
@@ -56,7 +80,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onMenuClick }) => {
           </div>
           
           <button 
-            onClick={handleSignOut}
+            onClick={hardLogout}
             className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"
             title="Sign Out"
           >

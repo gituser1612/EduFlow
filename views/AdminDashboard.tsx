@@ -17,7 +17,6 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis
 } from 'recharts';
 import StatCard from '../components/StatCard';
-import GeminiInsights from '../components/GeminiInsights';
 import { supabase } from '../supabase';
 
 const AdminDashboard: React.FC = () => {
@@ -188,9 +187,6 @@ const AdminDashboard: React.FC = () => {
               </ResponsiveContainer>
             </div>
           </div>
-        </div>
-        <div className="space-y-8">
-          <GeminiInsights context={`Institutional State: Students: ${counts.students}, Faculty: ${counts.teachers}, Attendance: ${counts.attendanceRate}%, Revenue: ${counts.revenue}`} />
         </div>
       </div>
       {notification && (

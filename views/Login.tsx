@@ -39,24 +39,29 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setAuthError(null);
-    
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+ const handleLoginSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setIsLoading(true);
+  setAuthError(null);
 
-      if (error) throw error;
-    } catch (err: any) {
-      setAuthError(err.message || 'Invalid login credentials');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) throw error;
+
+    // ✅ login successful
+    // App.tsx onAuthStateChange will auto redirect
+  } catch (err: any) {
+    setAuthError(err?.message || "Invalid login credentials");
+  } finally {
+    setIsLoading(false);
+  }
+ 
+};
+
 
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

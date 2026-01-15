@@ -16,11 +16,8 @@ import {
 import { AttendanceStatus, Teacher, Student } from '../types';
 import { supabase } from '../supabase';
 
-interface TeacherDashboardProps {
-  teacherId: string | null;
-}
 
-const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
+const TeacherDashboard: React.FC = () => {
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,60 +50,70 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
     }
   }, []);
 
-  const fetchTeacherData = async () => {
-    if (!teacherId) {
+const fetchTeacherData = async () => {
+  setIsLoading(true);
+
+  try {
+    // 1) Get logged-in user session
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    const userEmail = sessionData.session?.user?.email;
+
+    if (!userEmail) {
+      setTeacher(null);
+      setStudents([]);
       setIsLoading(false);
       return;
     }
-    setIsLoading(true);
-    try {
-      const { data: teacherData, error: tError } = await supabase
-        .from('teachers')
-        .select('*')
-        .eq('id', teacherId)
-        .single();
 
-      if (tError) throw tError;
+    // 2) Fetch teacher record using email
+    const { data: teacherData, error: tError } = await supabase
+      .from("teachers")
+      .select("*")
+      .eq("email", userEmail)
+      .single();
 
-      if (teacherData) {
-        setTeacher({
-          id: teacherData.id,
-          name: teacherData.name,
-          subject: teacherData.subject
-        });
-        
-        // Fetch students assigned to this specific teacher record
-        const { data: studentsData, error: sError } = await supabase
-          .from('students')
-          .select('*')
-          .eq('teacher_id', teacherId);
+    if (tError) throw tError;
 
-        if (sError) throw sError;
+    setTeacher({
+      id: teacherData.id,
+      name: teacherData.name,
+      subject: teacherData.subject,
+    });
 
-        if (studentsData) {
-          const mappedStudents = studentsData.map(s => ({
-            id: s.id,
-            name: s.name,
-            parentName: s.parent_name,
-            rollNo: s.roll_no,
-            feesDue: s.fees_due ?? 0,
-            teacherId: s.teacher_id,
-            parentId: ''
-          }));
-          setStudents(mappedStudents);
-          await fetchTodayAttendance(mappedStudents.map(s => s.id));
-        }
-      }
-    } catch (err: any) {
-      console.error("Dashboard sync error:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    // 3) Fetch students assigned to teacher
+    const { data: studentsData, error: sError } = await supabase
+      .from("students")
+      .select("*")
+      .eq("teacher_id", teacherData.id);
+
+    if (sError) throw sError;
+
+    const mappedStudents = (studentsData || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      parentName: s.parent_name,
+      rollNo: s.roll_no,
+      feesDue: s.fees_due ?? 0,
+      teacherId: s.teacher_id,
+      parentId: "",
+    }));
+
+    setStudents(mappedStudents);
+
+    // 4) Fetch today's attendance marks
+    await fetchTodayAttendance(mappedStudents.map((s) => s.id));
+  } catch (err: any) {
+    console.error("Dashboard sync error:", err.message || err);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchTeacherData();
-  }, [teacherId]);
+  }, [fetchTodayAttendance]);
 
   const handleMark = (student_id: string, status: AttendanceStatus) => {
     setMarkedToday(prev => ({ ...prev, [student_id]: status }));
@@ -177,21 +184,23 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacherId }) => {
     );
   }
 
-  if (!teacherId) {
-    return (
-      <div className="max-w-md mx-auto py-24 text-center space-y-8 animate-in zoom-in-95">
-        <div className="w-24 h-24 bg-amber-50 rounded-[2.5rem] flex items-center justify-center mx-auto ring-8 ring-amber-50/50">
-          <LinkIcon className="w-10 h-10 text-amber-500" />
-        </div>
-        <div className="space-y-3">
-          <h2 className="text-2xl font-black text-slate-900 leading-tight">Profile Not Linked</h2>
-          <p className="text-slate-500 font-medium leading-relaxed">
-            Your user account hasn't been linked to a Teacher record yet. Please ask the <span className="text-indigo-600 font-bold">Administrator</span> to link your profile in the "Access Control" terminal.
-          </p>
-        </div>
+if (!teacher) {
+  return (
+    <div className="max-w-md mx-auto py-24 text-center space-y-8 animate-in zoom-in-95">
+      <div className="w-24 h-24 bg-amber-50 rounded-[2.5rem] flex items-center justify-center mx-auto ring-8 ring-amber-50/50">
+        <LinkIcon className="w-10 h-10 text-amber-500" />
       </div>
-    );
-  }
+      <div className="space-y-3">
+        <h2 className="text-2xl font-black text-slate-900 leading-tight">Profile Not Linked</h2>
+        <p className="text-slate-500 font-medium leading-relaxed">
+          Your login email is not linked to any Teacher record.
+          Please ask Admin to add your email in Teachers table.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 
   return (
     <div className="space-y-8 pb-12 animate-in fade-in duration-500">

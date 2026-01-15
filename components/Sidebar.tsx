@@ -33,10 +33,11 @@ const Sidebar: React.FC<SidebarProps> = ({ user, onLogout, isMobileOpen, setIsMo
       { name: 'Access Controls', icon: ShieldCheck, path: '/admin/users' },
     ],
     [UserRole.TEACHER]: [
-      { name: 'Overview', icon: LayoutDashboard, path: '/teacher' },
-      { name: 'Register', icon: CalendarCheck, path: '/teacher/attendance' },
-      { name: 'Student List', icon: Users, path: '/teacher/students' },
-    ],
+  { name: 'Overview', icon: LayoutDashboard, path: '/teacher' },
+  { name: 'Register', icon: CalendarCheck, path: '/teacher/attendance' },
+  { name: 'Student List', icon: Users, path: '/teacher/students' },
+  { name: 'Fees', icon: CreditCard, path: '/teacher/fees' },
+],
     [UserRole.PARENT]: [
       { name: 'Overview', icon: LayoutDashboard, path: '/parent' },
       { name: 'Attendance History', icon: CalendarCheck, path: '/parent/attendance' },
